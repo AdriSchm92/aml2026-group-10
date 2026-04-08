@@ -1,0 +1,33 @@
+.env
+.env.*
+
+# Python cache/build artifacts
+__pycache__/
+*.py[cod]
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tool caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Audio / data files (data lives on SwitchDrive, not in the repo)
+*.ogg
+*.wav
+*.mp3
+*.flac
+data/raw/
