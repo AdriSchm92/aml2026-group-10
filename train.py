@@ -139,7 +139,7 @@ def parse_args() -> argparse.Namespace:
                         "define build_model(num_classes) -> nn.Module.")
     p.add_argument("--epochs", type=int, default=5)
     p.add_argument("--batch_size", type=int, default=32)
-    p.add_argument("--num_workers", type=int, default=2)
+    p.add_argument("--num_workers", type=int, default=12)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--weight_decay", type=float, default=1e-4)
     p.add_argument("--val_size", type=float, default=0.15)
@@ -172,7 +172,7 @@ def run_epoch(model, loader, optimizer, criterion, scaler, device, args):
         specs = specs.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
-        with torch.cuda.amp.autocast(enabled=use_amp):
+        with torch.amp.autocast(device_type=device.type, enabled=use_amp):
             logits = model(specs)
             loss = criterion(logits, labels)
         if use_amp:
@@ -248,7 +248,8 @@ def main() -> TrainingRunSummary:
         optimizer, T_max=max(1, args.epochs)
     )
     criterion = nn.BCEWithLogitsLoss()
-    scaler = torch.cuda.amp.GradScaler(enabled=args.amp and device.type == "cuda")
+    use_amp = bool(args.amp and device.type == "cuda")
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     tag = f"_{args.tag}" if args.tag else ""
     ckpt_path = output_dir / f"best_{args.model}{tag}.pt"
