@@ -221,12 +221,23 @@ def build_dataloaders(
 
     # ── 2. Stratified split of train_audio into train / val ──────────────────
     # Val set comes only from train_audio for clean, consistent evaluation
+    counts = df["primary_label"].value_counts()
+    singleton_species = counts[counts < 2].index
+    df_main = df[~df["primary_label"].isin(singleton_species)]
+    df_singletons = df[df["primary_label"].isin(singleton_species)]
+
     train_df, val_df = train_test_split(
-        df,
-        test_size    = val_size,
-        stratify     = df['primary_label'],
-        random_state = random_state,
+        df_main,
+        test_size=val_size,
+        stratify=df_main["primary_label"],
+        random_state=random_state,
     )
+    if len(df_singletons) > 0:
+        train_df = pd.concat([train_df, df_singletons], ignore_index=True)
+        print(
+            f"Stratified split note — moved singleton classes to train only: "
+            f"{len(df_singletons)} recordings across {df_singletons['primary_label'].nunique()} species"
+        )
     print(f"train_audio split — train: {len(train_df)}, val: {len(val_df)}")
 
     # ── 3. Fit label encoder on ALL species in train_audio ───────────────────
