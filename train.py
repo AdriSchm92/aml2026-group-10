@@ -3,7 +3,9 @@
 Paths: ``--data_root`` and ``DATA_ROOT`` override everything else. If both are unset, a
 valid **local stash** is used: ``birdclef_stash/`` at the repo root (or ``BIRDCLEF_STASH_DIR``) when
 ``train.csv`` is present. Populate the stash from a slow or remote tree with
-``python scripts/stash_birdclef_data.py --source /path/to/birdclef-2026`` (see that script). Otherwise
+``python scripts/stash_birdclef_data.py --source /path/to/birdclef-2026`` or
+``--kaggle-download`` with a Kaggle **API token** (``KAGGLE_API_TOKEN`` or
+``~/.kaggle/access_token``; ``kaggle>=1.8.0`` — see that script and https://pypi.org/project/kaggle/). Otherwise
 resolution falls back to Kaggle input or ``data/raw/``.
 
 ``TRAINING_OUTPUT_DIR`` / ``TRAINING_OUTPUT_SUBDIR`` / ``--output_dir``: checkpoints + metrics.
