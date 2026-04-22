@@ -1,4 +1,6 @@
+import json
 import os
+import tempfile
 import numpy as np
 import pandas as pd
 import librosa
@@ -20,6 +22,48 @@ HOP_LENGTH    = 512
 N_FFT         = 1024
 F_MIN         = 50       # ignore very low frequencies (wind noise)
 F_MAX         = 14000    # upper bound relevant for bird calls
+
+# Per-file librosa.get_duration is slow on network mounts; cache in repo .cache/
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _default_duration_cache_path() -> str:
+    return os.path.join(REPO_ROOT, ".cache", "birdclef", "train_audio_durations.json")
+
+
+def _stat_sig(path: str) -> tuple[int, int]:
+    st = os.stat(path)
+    mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000))
+    return int(mtime_ns), int(st.st_size)
+
+
+def _load_json(path: str) -> dict:
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _atomic_write_json(path: str, data: dict) -> None:
+    d = os.path.dirname(path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        dir=d or None, prefix="durations.", suffix=".tmp", text=True
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=0, sort_keys=True)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 class BirdCLEFDataset(Dataset):
@@ -114,7 +158,13 @@ class BirdCLEFDataset(Dataset):
 # they can be concatenated cleanly.
 # ─────────────────────────────────────────────
 
-def build_samples_from_train_audio(df, audio_dir):
+def build_samples_from_train_audio(
+    df,
+    audio_dir,
+    duration_cache_path: str | None = None,
+    verbose_data: bool = False,
+    split_label: str = "",
+):
     """
     Builds sample list from train_audio/ (clean single-species recordings).
 
@@ -124,16 +174,43 @@ def build_samples_from_train_audio(df, audio_dir):
     Args:
         df        : pd.DataFrame with columns ['filename', 'primary_label']
         audio_dir : path to train_audio/ folder
+        duration_cache_path : JSON cache of path -> duration + mtime/size (avoids
+            repeated librosa.get_duration on slow / network filesystems).
+        verbose_data : print cache miss count
 
     Returns:
         list of dicts with keys: file_path, offset, labels
     """
+    cache_path = duration_cache_path or _default_duration_cache_path()
+    cache = _load_json(cache_path)
+    prefix = f"[{split_label}] " if split_label else ""
+    if cache:
+        print(f"{prefix}duration cache: {len(cache)} existing entries in {cache_path}")
+    n_hit, n_miss = 0, 0
     samples = []
     for _, row in df.iterrows():
         file_path = os.path.join(audio_dir, row['filename'])
         if not os.path.exists(file_path):
             continue
-        duration = librosa.get_duration(path=file_path)
+        abspath = os.path.normpath(os.path.abspath(file_path))
+        mtime_ns, size = _stat_sig(abspath)
+        ent = cache.get(abspath)
+        if (
+            ent
+            and int(ent.get("mtime_ns", -1)) == mtime_ns
+            and int(ent.get("size", -1)) == size
+            and "duration" in ent
+        ):
+            duration = float(ent["duration"])
+            n_hit += 1
+        else:
+            duration = float(librosa.get_duration(path=file_path))
+            cache[abspath] = {
+                "duration": duration,
+                "mtime_ns": mtime_ns,
+                "size": size,
+            }
+            n_miss += 1
         n_chunks = max(1, int(duration // CLIP_DURATION))
         for chunk_idx in range(n_chunks):
             samples.append({
@@ -141,6 +218,13 @@ def build_samples_from_train_audio(df, audio_dir):
                 'offset'    : chunk_idx * CLIP_DURATION,
                 'labels'    : [row['primary_label']],  # single-label, wrapped in list
             })
+    _atomic_write_json(cache_path, cache)
+    print(
+        f"{prefix}duration cache: {len(cache)} total entries  "
+        f"(hits={n_hit}, misses={n_miss})  -> {cache_path}"
+    )
+    if verbose_data and n_miss:
+        print(f"{prefix}duration cache: {n_miss} files re-scanned this run")
     return samples
 
 
@@ -191,6 +275,8 @@ def build_dataloaders(
     batch_size      : int   = 32,
     num_workers     : int   = 4,
     random_state    : int   = 42,
+    duration_cache_path: str | None = None,
+    verbose_data    : bool  = False,
 ):
     """
     Builds train and validation DataLoaders from both data sources combined.
@@ -210,6 +296,9 @@ def build_dataloaders(
         batch_size      : DataLoader batch size
         num_workers     : parallel workers for data loading
         random_state    : random seed for reproducibility
+        duration_cache_path: JSON file for train_audio duration cache (default:
+            <repo>/.cache/birdclef/train_audio_durations.json)
+        verbose_data    : extra cache / I/O print
 
     Returns:
         train_loader, val_loader, label_encoder (MultiLabelBinarizer)
@@ -249,9 +338,15 @@ def build_dataloaders(
     print(f"Number of classes K: {len(mlb.classes_)}")
 
     # ── 4. Build sample lists ─────────────────────────────────────────────────
-    train_audio_samples     = build_samples_from_train_audio(train_df, audio_dir)
-    soundscape_samples      = build_samples_from_soundscapes(soundscapes_csv, soundscapes_dir)
-    val_samples             = build_samples_from_train_audio(val_df, audio_dir)
+    train_audio_samples     = build_samples_from_train_audio(
+        train_df, audio_dir, duration_cache_path, verbose_data, "train"
+    )
+    soundscape_samples      = build_samples_from_soundscapes(
+        soundscapes_csv, soundscapes_dir
+    )
+    val_samples             = build_samples_from_train_audio(
+        val_df, audio_dir, duration_cache_path, verbose_data, "val"
+    )
 
     # Training set = clean recordings + real-world soundscapes
     train_samples = train_audio_samples + soundscape_samples

@@ -2,16 +2,19 @@
 
 Loads the model via models.registry (same as train.py) and reuses the val
 loader from data.preprocessing.data_pipeline. Prints macro AUC + tuned
-macro F1 + per-class stats.
+macro F1 + per-class stats. Uses ``resolve_output_dir`` like ``train.py`` so
+``--checkpoint`` can be omitted when a default best_*.pt exists.
 
 Usage:
-  python evaluate.py --checkpoint runs/best_resnet18.pt
-  python evaluate.py --checkpoint /kaggle/working/runs/best_resnet18.pt
+  python evaluate.py --checkpoint runs/best_cnn_baseline.pt
+  python evaluate.py --model cnn_baseline
+  # Uses TRAINING_OUTPUT_DIR or the same default as train.py when --checkpoint omitted
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -24,14 +27,34 @@ if str(REPO_ROOT) not in sys.path:
 
 from data.preprocessing.data_pipeline import build_dataloaders  # noqa: E402
 from models.registry import load_model  # noqa: E402
-from train import resolve_data_root  # noqa: E402
+from train import resolve_data_root, resolve_output_dir  # noqa: E402
 from utils.inference import predict_val_probs  # noqa: E402
 from utils.metrics import macro_f1_tuned, macro_roc_auc  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Evaluate a trained checkpoint")
-    p.add_argument("--checkpoint", required=True)
+    p.add_argument(
+        "--checkpoint",
+        default=None,
+        help="Path to .pt from training. If omitted, uses OUTPUT_DIR/best_<model>.pt "
+        "(same resolution as train: --output_dir, TRAINING_OUTPUT_DIR, Renku default).",
+    )
+    p.add_argument(
+        "--model",
+        default="cnn_baseline",
+        help="Checkpoint stem when --checkpoint is omitted (best_<model>[_tag].pt).",
+    )
+    p.add_argument(
+        "--tag",
+        default=None,
+        help="Same as train.py --tag when resolving default checkpoint path.",
+    )
+    p.add_argument(
+        "--output_dir",
+        default=None,
+        help="Override artifact directory (same as train.py --output_dir).",
+    )
     p.add_argument("--data_root", default=None)
     p.add_argument("--batch_size", type=int, default=32)
     p.add_argument("--num_workers", type=int, default=2)
@@ -45,7 +68,20 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     data_root = resolve_data_root(args.data_root)
-    ckpt = torch.load(args.checkpoint, map_location="cpu")
+    data_root = data_root.resolve()
+    out_dir = resolve_output_dir(args.output_dir, data_root)
+    if args.checkpoint:
+        ckpt_path = Path(args.checkpoint)
+    else:
+        tag = f"_{args.tag}" if args.tag else ""
+        ckpt_path = out_dir / f"best_{args.model}{tag}.pt"
+    if not ckpt_path.is_file():
+        raise FileNotFoundError(
+            f"Checkpoint not found: {ckpt_path}. Train first or pass --checkpoint."
+        )
+    print(f"OUTPUT_DIR (resolved): {out_dir}")
+    print(f"Loading checkpoint:    {ckpt_path}")
+    ckpt = torch.load(ckpt_path, map_location="cpu")
     num_classes = ckpt["num_classes"]
 
     _, val_loader, mlb = build_dataloaders(
@@ -57,6 +93,7 @@ def main() -> None:
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         random_state=args.seed,
+        duration_cache_path=(os.environ.get("BIRDCLEF_DURATION_CACHE") or None),
     )
 
     if len(mlb.classes_) != num_classes:
@@ -75,7 +112,7 @@ def main() -> None:
     f1, _ = macro_f1_tuned(y_true, y_score)
 
     valid_mask = ~np.isnan(per_class)
-    print(f"Checkpoint      : {args.checkpoint}")
+    print(f"Checkpoint      : {ckpt_path}")
     print(f"Model           : {ckpt['model_name']}  (K={num_classes})")
     print(f"Train-time epoch: {ckpt.get('epoch', '?')}  "
           f"val_auc={ckpt.get('val_auc', float('nan')):.4f}")

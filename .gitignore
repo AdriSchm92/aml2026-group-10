@@ -31,3 +31,9 @@ env/
 *.mp3
 *.flac
 data/raw/
+
+# Training / duration cache (repo-local, not committed)
+.cache/
+runs/
+# Local mirror of the BirdCLEF competition tree (from scripts/stash_birdclef_data.py)
+birdclef_stash/

@@ -1,17 +1,21 @@
 """Training harness for BirdCLEF 2026.
 
-Minimal, model-agnostic. Runs on:
-  • Kaggle kernels     (auto-detects /kaggle/input/birdclef-2026 and /kaggle/working)
-  • Renku / laptop     (set DATA_ROOT env var or pass --data_root)
+Paths: ``--data_root`` and ``DATA_ROOT`` override everything else. If both are unset, a
+valid **local stash** is used: ``birdclef_stash/`` at the repo root (or ``BIRDCLEF_STASH_DIR``) when
+``train.csv`` is present. Populate the stash from a slow or remote tree with
+``python scripts/stash_birdclef_data.py --source /path/to/birdclef-2026`` (see that script). Otherwise
+resolution falls back to Kaggle input or ``data/raw/``.
 
-Usage examples:
-  python train.py --model resnet18 --epochs 5
-  python train.py --model resnet18 --limit_train_batches 4 --epochs 1  # smoke test
-  DATA_ROOT=/path/to/birdclef-2026 python train.py --model resnet18
+``TRAINING_OUTPUT_DIR`` / ``TRAINING_OUTPUT_SUBDIR`` / ``--output_dir``: checkpoints + metrics.
+``TRAINING_OUTPUT_SUBDIR`` default ``aml2026-group10-runs`` on Renku under ``kaggle-data/`` parents.
 
-Dependencies assumed installed: torch, torchaudio, timm, librosa, scikit-learn,
-pandas, numpy. On Kaggle, add ``!pip install timm`` if the notebook base image
-does not ship it.
+Duration cache (``librosa.get_duration`` on many files) lives in ``.cache/birdclef/``; see
+``data_pipeline``.
+
+Kaggle: auto-detects /kaggle/input and /kaggle/working. Renku: often
+``--data_root /home/renku/work/kaggle-data/...`` **or** sync into ``birdclef_stash/`` and omit ``DATA_ROOT``.
+
+``python train.py --model cnn_baseline`` — smoke: ``--limit_train_batches 4 --epochs 1``
 """
 from __future__ import annotations
 
@@ -21,6 +25,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import TypedDict
 
 import numpy as np
 import torch
@@ -36,27 +41,81 @@ from utils.inference import predict_val_probs  # noqa: E402
 from utils.metrics import macro_f1_tuned, macro_roc_auc  # noqa: E402
 
 
+class TrainingRunSummary(TypedDict):
+    best_auc: float
+    checkpoint: str
+    metrics: str
+
+
+def _default_stash_path() -> Path:
+    env = (os.environ.get("BIRDCLEF_STASH_DIR") or "").strip()
+    return Path(env) if env else (REPO_ROOT / "birdclef_stash")
+
+
+def _valid_stash_data_root() -> Path | None:
+    p = _default_stash_path()
+    if (p / "train.csv").is_file():
+        return p.resolve()
+    return None
+
+
+def _is_stash_path(resolved: Path) -> bool:
+    stash = _valid_stash_data_root()
+    if stash is None:
+        return False
+    try:
+        return resolved == stash
+    except OSError:
+        return False
+
+
 def resolve_data_root(user_arg: str | None) -> Path:
-    """Locate the data root on any host (laptop / Renku / Kaggle)."""
-    candidates = [
-        user_arg,
-        os.environ.get("DATA_ROOT"),
-        "/kaggle/input/birdclef-2026",
-        str(REPO_ROOT / "data" / "raw"),
-    ]
-    for c in candidates:
+    """Locate the data root. Explicit ``--data_root`` / ``DATA_ROOT`` beat the local stash."""
+    tried: list[str] = []
+    if user_arg:
+        p = Path(user_arg)
+        if not p.exists():
+            raise FileNotFoundError(f"--data_root does not exist: {user_arg}")
+        r = p.resolve()
+        if _is_stash_path(r):
+            print(f"Using local stash (from --data_root): {r}")
+        return r
+    data_root = (os.environ.get("DATA_ROOT") or "").strip()
+    if data_root:
+        p = Path(data_root)
+        if not p.exists():
+            raise FileNotFoundError(f"DATA_ROOT does not exist: {data_root}")
+        r = p.resolve()
+        if _is_stash_path(r):
+            print(f"Using local stash (from DATA_ROOT): {r}")
+        return r
+    stash = _valid_stash_data_root()
+    if stash is not None:
+        print(f"Using local stash: {stash}")
+        return stash
+    tried.append(f"stash:{_default_stash_path()}")
+    for c in ("/kaggle/input/birdclef-2026", str(REPO_ROOT / "data" / "raw")):
         if c and Path(c).exists():
             return Path(c)
+        if c:
+            tried.append(c)
     raise FileNotFoundError(
-        "No data root found. Pass --data_root or set DATA_ROOT. "
-        f"Tried: {[c for c in candidates if c]}"
+        "No data root found. Pass --data_root, set DATA_ROOT, run "
+        "scripts/stash_birdclef_data.py, or link data under data/raw/. "
+        f"Tried: {tried}"
     )
 
 
-def resolve_output_dir(user_arg: str | None) -> Path:
-    """Pick a writable output location. Kaggle kernels write to /kaggle/working."""
-    if user_arg:
-        out = Path(user_arg)
+def resolve_output_dir(cli_path: str | None, data_root: Path) -> Path:
+    """Writables: CLI, then TRAINING_OUTPUT_DIR, then Renku+kaggle-data heuristic, else Kaggle, else ./runs."""
+    env_out = (os.environ.get("TRAINING_OUTPUT_DIR") or "").strip()
+    if cli_path:
+        out = Path(cli_path)
+    elif env_out:
+        out = Path(env_out)
+    elif Path("/home/renku").exists() and "kaggle-data" in str(data_root):
+        sub = (os.environ.get("TRAINING_OUTPUT_SUBDIR") or "aml2026-group10-runs").strip()
+        out = data_root.parent / sub
     elif Path("/kaggle/working").exists() and os.access("/kaggle/working", os.W_OK):
         out = Path("/kaggle/working") / "runs"
     else:
@@ -92,6 +151,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--grad_clip", type=float, default=1.0)
     p.add_argument("--tag", default=None,
                    help="Optional suffix for checkpoint filename.")
+    p.add_argument(
+        "--verbose_data",
+        action="store_true",
+        help="Extra duration-cache / dataloader details.",
+    )
     return p.parse_args()
 
 
@@ -136,17 +200,24 @@ def cap_loader(loader, limit):
     return batches
 
 
-def main() -> None:
+def main() -> TrainingRunSummary:
     args = parse_args()
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
     data_root = resolve_data_root(args.data_root)
-    output_dir = resolve_output_dir(args.output_dir)
+    data_root = data_root.resolve()
+    output_dir = resolve_output_dir(args.output_dir, data_root)
     print(f"DATA_ROOT  : {data_root}")
     print(f"OUTPUT_DIR : {output_dir}")
+    if "/home/renku" in str(data_root) and "kaggle-data" in str(data_root):
+        print(
+            "Note: kaggle-data on a network mount; long startup is reduced by "
+            "the duration cache under .cache/birdclef/ in the repo."
+        )
     print(f"ARGS       : {vars(args)}")
 
+    t0 = time.perf_counter()
     train_loader, val_loader, mlb = build_dataloaders(
         metadata_csv=str(data_root / "train.csv"),
         audio_dir=str(data_root / "train_audio"),
@@ -156,7 +227,10 @@ def main() -> None:
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         random_state=args.seed,
+        duration_cache_path=(os.environ.get("BIRDCLEF_DURATION_CACHE") or None),
+        verbose_data=args.verbose_data,
     )
+    print(f"build_dataloaders: {time.perf_counter() - t0:.2f}s  (DataLoader num_workers={args.num_workers})")
 
     num_classes = len(mlb.classes_)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -181,6 +255,10 @@ def main() -> None:
     best_auc = -1.0
 
     val_batches = cap_loader(val_loader, args.limit_val_batches)
+
+    t_warm = time.perf_counter()
+    _ = next(iter(train_loader))
+    print(f"first training batch: {time.perf_counter() - t_warm:.2f}s")
 
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
@@ -230,7 +308,33 @@ def main() -> None:
     print(f"Done. Best val AUC: {best_auc:.4f}")
     print(f"Checkpoint: {ckpt_path}")
     print(f"Metrics   : {metrics_path}")
+    return {
+        "best_auc": best_auc,
+        "checkpoint": str(ckpt_path),
+        "metrics": str(metrics_path),
+    }
 
 
 if __name__ == "__main__":
-    main()
+    import traceback
+
+    try:
+        from utils.notify import training_event
+    except Exception:
+        def training_event(_title: str, _body: str = "") -> None:  # noqa: ARG001
+            pass
+
+    try:
+        out = main()
+    except KeyboardInterrupt:
+        training_event("interrupted (KeyboardInterrupt)", "Stopped by user.")
+        raise SystemExit(130) from None
+    except Exception as e:
+        tb = traceback.format_exc()
+        training_event("training error", f"{type(e).__name__}: {e}\n{tb[-1500:]}")
+        raise
+    else:
+        training_event(
+            "finished",
+            f"best_auc={out['best_auc']:.4f}\ncheckpoint={out['checkpoint']}\nmetrics={out['metrics']}",
+        )
