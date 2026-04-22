@@ -18,6 +18,7 @@ Kaggle: auto-detects /kaggle/input and /kaggle/working. Renku: often
 ``--data_root /home/renku/work/kaggle-data/...`` **or** sync into ``birdclef_stash/`` and omit ``DATA_ROOT``.
 
 ``python train.py --model cnn_baseline`` — smoke: ``--limit_train_batches 4 --epochs 1``
+Default: AMP on (CUDA), ``--no-amp`` for FP32; ``--batch_size`` 64, ``--num_workers`` 6.
 """
 from __future__ import annotations
 
@@ -138,14 +139,18 @@ def parse_args() -> argparse.Namespace:
                         "vit_baseline, cnn_transformer). Each such file must "
                         "define build_model(num_classes) -> nn.Module.")
     p.add_argument("--epochs", type=int, default=5)
-    p.add_argument("--batch_size", type=int, default=32)
-    p.add_argument("--num_workers", type=int, default=12)
+    p.add_argument("--batch_size", type=int, default=64)
+    p.add_argument("--num_workers", type=int, default=6)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--weight_decay", type=float, default=1e-4)
     p.add_argument("--val_size", type=float, default=0.15)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--amp", action="store_true",
-                   help="Mixed precision (ignored on CPU).")
+    p.add_argument(
+        "--amp",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Mixed precision on CUDA (default: on). --no-amp for FP32. Ignored on CPU.",
+    )
     p.add_argument("--limit_train_batches", type=int, default=None,
                    help="Cap batches/epoch for smoke tests.")
     p.add_argument("--limit_val_batches", type=int, default=None,
@@ -319,6 +324,7 @@ def main() -> TrainingRunSummary:
 
 
 if __name__ == "__main__":
+    import signal
     import traceback
 
     try:
@@ -326,6 +332,13 @@ if __name__ == "__main__":
     except Exception:
         def training_event(_title: str, _body: str = "") -> None:  # noqa: ARG001
             pass
+
+    def _on_sigterm(_signum: int, _frame) -> None:
+        # Job schedulers (e.g. Renku/K8s) often send SIGTERM, not SIGINT; no KeyboardInterrupt.
+        training_event("cancelled (SIGTERM)", "Process received SIGTERM (stop/kill from scheduler).")
+        raise SystemExit(143)  # 128 + 15
+
+    signal.signal(signal.SIGTERM, _on_sigterm)
 
     try:
         out = main()
