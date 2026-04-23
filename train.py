@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -156,6 +157,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--limit_val_batches", type=int, default=None,
                    help="Cap val batches (smoke tests).")
     p.add_argument("--grad_clip", type=float, default=1.0)
+    p.add_argument("--warmup_epochs", type=int, default=0,
+                   help="Linear LR warmup epochs before cosine decay. "
+                        "0 = disabled (original CosineAnnealingLR). "
+                        "Recommended: 5 for ViT models.")
+    p.add_argument("--label_smoothing", type=float, default=0.0,
+                   help="Label smoothing for BCEWithLogitsLoss. "
+                        "0 = disabled. Recommended: 0.1 for ViT models.")
     p.add_argument("--tag", default=None,
                    help="Optional suffix for checkpoint filename.")
     p.add_argument(
@@ -249,10 +257,20 @@ def main() -> TrainingRunSummary:
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
     )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max(1, args.epochs)
-    )
-    criterion = nn.BCEWithLogitsLoss()
+    if args.warmup_epochs > 0:
+        warmup = args.warmup_epochs
+        total = max(1, args.epochs)
+        def _lr_lambda(epoch: int) -> float:
+            if epoch < warmup:
+                return (epoch + 1) / warmup
+            progress = (epoch - warmup) / max(1, total - warmup)
+            return 0.5 * (1.0 + math.cos(math.pi * progress))
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, _lr_lambda)
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=max(1, args.epochs)
+        )
+    criterion = nn.BCEWithLogitsLoss(label_smoothing=args.label_smoothing)
     use_amp = bool(args.amp and device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
