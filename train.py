@@ -184,6 +184,9 @@ def run_epoch(model, loader, optimizer, criterion, scaler, device, args):
             break
         specs = specs.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
+        if args.label_smoothing > 0.0:
+            # smooth binary targets: 1 → 1-ε/2, 0 → ε/2
+            labels = labels * (1.0 - args.label_smoothing) + 0.5 * args.label_smoothing
         optimizer.zero_grad(set_to_none=True)
         with torch.amp.autocast(device_type=device.type, enabled=use_amp):
             logits = model(specs)
@@ -270,7 +273,7 @@ def main() -> TrainingRunSummary:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=max(1, args.epochs)
         )
-    criterion = nn.BCEWithLogitsLoss(label_smoothing=args.label_smoothing)
+    criterion = nn.BCEWithLogitsLoss()
     use_amp = bool(args.amp and device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
