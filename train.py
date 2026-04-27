@@ -43,6 +43,7 @@ from data.preprocessing.data_pipeline import build_dataloaders  # noqa: E402
 from models.registry import available_models, load_model  # noqa: E402
 from utils.inference import predict_val_probs  # noqa: E402
 from utils.metrics import macro_f1_tuned, macro_roc_auc  # noqa: E402
+from utils.soundscape_eval import build_soundscape_val_loader  # noqa: E402
 
 
 class TrainingRunSummary(TypedDict):
@@ -157,6 +158,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--limit_val_batches", type=int, default=None,
                    help="Cap val batches (smoke tests).")
     p.add_argument("--grad_clip", type=float, default=1.0)
+    p.add_argument("--soundscape_val_size", type=float, default=0.2,
+                   help="Fraction of soundscape *files* held out for domain-shift "
+                        "eval. Logged each epoch but never used for checkpointing. "
+                        "0.0 disables soundscape val.")
     p.add_argument("--warmup_epochs", type=int, default=0,
                    help="Linear LR warmup epochs before cosine decay. "
                         "0 = disabled (original CosineAnnealingLR). "
@@ -250,6 +255,16 @@ def main() -> TrainingRunSummary:
     )
     print(f"build_dataloaders: {time.perf_counter() - t0:.2f}s  (DataLoader num_workers={args.num_workers})")
 
+    _, sc_val_loader = build_soundscape_val_loader(
+        soundscapes_csv=str(data_root / "train_soundscapes_labels.csv"),
+        soundscapes_dir=str(data_root / "train_soundscapes"),
+        mlb=mlb,
+        val_size=args.soundscape_val_size,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        random_state=args.seed,
+    )
+
     num_classes = len(mlb.classes_)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"K          : {num_classes}")
@@ -299,22 +314,34 @@ def main() -> TrainingRunSummary:
         y_true, y_score = predict_val_probs(model, val_batches, device)
         auc, per_class_auc = macro_roc_auc(y_true, y_score)
         f1, thresholds = macro_f1_tuned(y_true, y_score)
+
+        sc_auc, sc_f1 = float("nan"), float("nan")
+        if sc_val_loader is not None:
+            sc_y_true, sc_y_score = predict_val_probs(model, sc_val_loader, device)
+            sc_auc, _ = macro_roc_auc(sc_y_true, sc_y_score)
+            sc_f1, _  = macro_f1_tuned(sc_y_true, sc_y_score)
+
         dt = time.time() - t0
+        sc_str = f"  sc_auc={sc_auc:.4f}  sc_f1={sc_f1:.4f}" if sc_val_loader is not None else ""
         print(
             f"[epoch {epoch:03d}] "
-            f"loss={train_loss:.4f}  val_auc={auc:.4f}  val_f1={f1:.4f}  "
-            f"time={dt:.1f}s"
+            f"loss={train_loss:.4f}  val_auc={auc:.4f}  val_f1={f1:.4f}"
+            f"{sc_str}  time={dt:.1f}s"
         )
 
         with metrics_path.open("a") as f:
-            f.write(json.dumps({
+            row: dict = {
                 "epoch": epoch,
                 "train_loss": train_loss,
                 "val_auc": auc,
                 "val_f1": f1,
                 "time_s": dt,
                 "lr": optimizer.param_groups[0]["lr"],
-            }) + "\n")
+            }
+            if sc_val_loader is not None:
+                row["sc_auc"] = sc_auc
+                row["sc_f1"]  = sc_f1
+            f.write(json.dumps(row) + "\n")
 
         if not np.isnan(auc) and auc > best_auc:
             best_auc = auc
