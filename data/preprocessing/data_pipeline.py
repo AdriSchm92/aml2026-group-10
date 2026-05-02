@@ -190,17 +190,18 @@ def build_dataloaders(
     val_size        : float = 0.15,
     batch_size      : int   = 32,
     num_workers     : int   = 4,
+    min_recordings  : int  = 2,
     random_state    : int   = 42,
 ):
     """
     Builds train and validation DataLoaders from both data sources combined.
-
+ 
     The validation set is drawn only from train_audio (clean, single-label)
     to keep evaluation simple and consistent. The soundscape samples are
     added to the training set only, since they represent the real-world
     distribution we want the model to learn from — not to be evaluated on
     using our internal metric.
-
+ 
     Args:
         metadata_csv    : path to train_metadata.csv
         audio_dir       : path to train_audio/ folder
@@ -210,16 +211,23 @@ def build_dataloaders(
         batch_size      : DataLoader batch size
         num_workers     : parallel workers for data loading
         random_state    : random seed for reproducibility
-
+ 
     Returns:
         train_loader, val_loader, label_encoder (MultiLabelBinarizer)
     """
-
+ 
     # ── 1. Load train_audio metadata ─────────────────────────────────────────
     df = pd.read_csv(metadata_csv)
     print(f"train_audio — recordings: {len(df)}, species: {df['primary_label'].nunique()}")
 
-    # ── 2. Stratified split of train_audio into train / val ──────────────────
+    # ── 2. Filter species below minimum threshold (fallback scope reduction) ─
+    counts = df['primary_label'].value_counts()
+    valid_species = counts[counts >= min_recordings].index # we need at least two recordings per class to split 
+    df = df[df['primary_label'].isin(valid_species)].reset_index(drop=True)
+    print(f"After threshold={min_recordings}: {len(df)} recordings, "
+          f"{df['primary_label'].nunique()} species")
+ 
+    # ── 3. Stratified split of train_audio into train / val ──────────────────
     # Val set comes only from train_audio for clean, consistent evaluation
     train_df, val_df = train_test_split(
         df,
@@ -228,32 +236,32 @@ def build_dataloaders(
         random_state = random_state,
     )
     print(f"train_audio split — train: {len(train_df)}, val: {len(val_df)}")
-
-    # ── 3. Fit label encoder on ALL species in train_audio ───────────────────
+ 
+    # ── 4. Fit label encoder on ALL species in train_audio ───────────────────
     # We fit on the full df (before split) so val species are always covered.
     # Soundscape species not in train_audio are silently ignored at label
     # building time (see the 'known_labels' filter in __getitem__).
     mlb = MultiLabelBinarizer()
     mlb.fit([[s] for s in sorted(df['primary_label'].unique())])
     print(f"Number of classes K: {len(mlb.classes_)}")
-
-    # ── 4. Build sample lists ─────────────────────────────────────────────────
+ 
+    # ── 5. Build sample lists ─────────────────────────────────────────────────
     train_audio_samples     = build_samples_from_train_audio(train_df, audio_dir)
     soundscape_samples      = build_samples_from_soundscapes(soundscapes_csv, soundscapes_dir)
     val_samples             = build_samples_from_train_audio(val_df, audio_dir)
-
+ 
     # Training set = clean recordings + real-world soundscapes
     train_samples = train_audio_samples + soundscape_samples
     print(f"Training samples  — audio chunks: {len(train_audio_samples)}, "
           f"soundscape segments: {len(soundscape_samples)}, "
           f"total: {len(train_samples)}")
     print(f"Validation samples: {len(val_samples)}")
-
-    # ── 5. Build Dataset objects ──────────────────────────────────────────────
+ 
+    # ── 6. Build Dataset objects ──────────────────────────────────────────────
     train_dataset = BirdCLEFDataset(train_samples, mlb, augment=True)
     val_dataset   = BirdCLEFDataset(val_samples,   mlb, augment=False)
-
-    # ── 6. Build DataLoaders ──────────────────────────────────────────────────
+ 
+    # ── 7. Build DataLoaders ──────────────────────────────────────────────────
     train_loader = DataLoader(
         train_dataset,
         batch_size  = batch_size,
@@ -268,89 +276,5 @@ def build_dataloaders(
         num_workers = num_workers,
         pin_memory  = True,
     )
-
+ 
     return train_loader, val_loader, mlb
-
-
-# ─────────────────────────────────────────────
-# QUICK SANITY CHECK
-# ─────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-
-    DATA_DIR        = "/path/to/birdclef-2026"
-    METADATA_CSV    = f"{DATA_DIR}/train.csv"
-    AUDIO_DIR       = f"{DATA_DIR}/train_audio"
-    SOUNDSCAPES_DIR = f"{DATA_DIR}/train_soundscapes"
-    SOUNDSCAPES_CSV = f"{DATA_DIR}/train_soundscapes_labels.csv"
-
-    train_loader, val_loader, mlb = build_dataloaders(
-        metadata_csv    = METADATA_CSV,
-        audio_dir       = AUDIO_DIR,
-        soundscapes_dir = SOUNDSCAPES_DIR,
-        soundscapes_csv = SOUNDSCAPES_CSV,
-        val_size        = 0.15,
-        batch_size      = 8,
-        num_workers     = 2,
-    )
-
-    fig, axes = plt.subplots(1, 3, figsize=(22, 4))
-
-    # ── Check 1: Training spectrogram (should show SpecAugment masks) ─────────
-    print("\n── Check 1: Training batch ──────────────────────────────────────────")
-    train_specs, train_labels = next(iter(train_loader))
-    print(f"Spectrogram shape : {train_specs.shape}")       # (8, 1, 128, 313)
-    print(f"Label vector shape: {train_labels.shape}")      # (8, K)
-    print(f"Label sums        : {train_labels.sum(dim=1)}") # all >= 1
-
-    ax = axes[0]
-    ax.imshow(train_specs[0, 0].numpy(), aspect='auto', origin='lower', cmap='viridis')
-    active = mlb.classes_[train_labels[0].bool().numpy()]
-    ax.set_title(f"[Train] labels: {', '.join(active)}\n"
-                 f"(SpecAugment masks expected)", fontsize=9)
-    ax.set_xlabel("Time frames"); ax.set_ylabel("Mel bins")
-
-    # ── Check 2: Validation spectrogram (should have NO SpecAugment masks) ────
-    print("\n── Check 2: Validation batch ────────────────────────────────────────")
-    val_specs, val_labels = next(iter(val_loader))
-    print(f"Spectrogram shape : {val_specs.shape}")
-    print(f"Label vector shape: {val_labels.shape}")
-    print(f"Label sums        : {val_labels.sum(dim=1)}")   # all 1 (single-label)
-
-    ax = axes[1]
-    ax.imshow(val_specs[0, 0].numpy(), aspect='auto', origin='lower', cmap='viridis')
-    active_val = mlb.classes_[val_labels[0].bool().numpy()]
-    ax.set_title(f"[Val] labels: {', '.join(active_val)}\n"
-                 f"(no SpecAugment masks expected)", fontsize=9)
-    ax.set_xlabel("Time frames"); ax.set_ylabel("Mel bins")
-
-    # ── Check 3: Multi-label soundscape sample ────────────────────────────────
-    print("\n── Check 3: Multi-label soundscape sample ───────────────────────────")
-    multi_label_idx = None
-    for i, sample in enumerate(train_loader.dataset.samples):
-        if len(sample['labels']) > 1:
-            multi_label_idx = i
-            break
-
-    if multi_label_idx is not None:
-        spec_ml, label_ml = train_loader.dataset[multi_label_idx]
-        sample_ml         = train_loader.dataset.samples[multi_label_idx]
-        active_ml         = mlb.classes_[label_ml.bool().numpy()]
-        print(f"Found at index    : {multi_label_idx}")
-        print(f"Raw labels        : {sample_ml['labels']}")
-        print(f"Encoded labels    : {active_ml}")
-        print(f"Label vector sum  : {label_ml.sum()}")  # should be > 1
-
-        ax = axes[2]
-        ax.imshow(spec_ml[0].numpy(), aspect='auto', origin='lower', cmap='viridis')
-        ax.set_title(f"[Soundscape] labels: {', '.join(active_ml)}\n"
-                     f"label sum = {int(label_ml.sum())} (multi-label expected)", fontsize=9)
-        ax.set_xlabel("Time frames"); ax.set_ylabel("Mel bins")
-    else:
-        print("No multi-label soundscape sample found — check soundscapes CSV loading.")
-        axes[2].set_title("[Soundscape] — no multi-label sample found")
-        axes[2].axis('off')
-
-    plt.tight_layout()
-    plt.show()
