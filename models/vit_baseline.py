@@ -33,5 +33,5 @@ class ViTBaseline(nn.Module):
         return self.vit(x)
 
 
-def build_model(num_classes: int) -> nn.Module:
+def build_model(num_classes: int, **_ignored) -> nn.Module:
     return ViTBaseline(num_classes)

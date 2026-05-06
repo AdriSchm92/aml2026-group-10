@@ -1,6 +1,11 @@
 # CNN Baseline Results (ResNet-18)
 
-**Role in project:** "ML baseline" — see [PROBLEMSETTING.md](PROBLEMSETTING.md#baselines)
+**Role in project:** "ML baseline" — see [PROBLEMSETTING.md](../PROBLEMSETTING.md#baselines)
+
+> **Note on split:** These results were measured on the original 85/15 train/val split
+> (no held-out test set). All future model runs use the 70/15/15 train/val/test split
+> introduced alongside `cnn_transformer`. Direct AUC comparisons should use numbers
+> from the same split.
 
 Architecture: ResNet-18 (`timm`, `in_chans=1`) on log-mel spectrograms `(1, 128, 313)`.  
 Loss: BCEWithLogitsLoss. Optimizer: AdamW (lr=1e-3, wd=1e-4). Scheduler: CosineAnnealingLR.  
@@ -23,5 +28,5 @@ AUC plateaued after epoch 2 (~0.956). F1 still improving slowly via better thres
 
 ## Next comparison models
 
-1. `vit_baseline` — pure ViT on raw patches, no CNN front-end
-2. `cnn_transformer` — CNN front-end + Transformer encoder (main proposed model)
+1. `vit_baseline` — pure ViT on raw patches, no CNN front-end — [docs/VIT_BASELINE.md](VIT_BASELINE.md)
+2. `cnn_transformer` — CNN front-end + Transformer encoder (main proposed model) — [docs/CNN_TRANSFORMER.md](CNN_TRANSFORMER.md)

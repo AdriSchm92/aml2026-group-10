@@ -1,6 +1,6 @@
 # RF Baseline Results (MFCC + Random Forest)
 
-**Role in project:** "Simple baseline" — see [PROBLEMSETTING.md](PROBLEMSETTING.md#baselines)
+**Role in project:** "Simple baseline" — see [PROBLEMSETTING.md](../PROBLEMSETTING.md#baselines)
 
 Architecture: MFCC mean+std over time → `(2 × n_mfcc,)` feature vector per 5s chunk.  
 `OneVsRestClassifier(RandomForestClassifier)` — one RF per class (206 binary classifiers).  

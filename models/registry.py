@@ -35,8 +35,16 @@ def available_models() -> list[str]:
     return sorted(names)
 
 
-def load_model(name: str, num_classes: int) -> nn.Module:
-    """Import ``models.<name>`` and return its ``build_model(num_classes)``."""
+def load_model(name: str, num_classes: int, **kwargs) -> nn.Module:
+    """Import ``models.<name>`` and return its ``build_model(num_classes, **kwargs)``.
+
+    ``kwargs`` are forwarded to ``build_model`` as keyword arguments.  Existing
+    models that only accept ``num_classes`` should declare ``**_ignored`` to
+    stay compatible, or simply ignore the extras — Python ignores unknown kwargs
+    when a function declares ``**kwargs``.  The ``cnn_transformer`` model uses
+    this to expose architecture hyperparameters (``d_model``, ``n_layers``, …)
+    to the HP search runner without modifying the training harness.
+    """
     try:
         module = importlib.import_module(f"models.{name}")
     except ModuleNotFoundError as e:
@@ -49,7 +57,7 @@ def load_model(name: str, num_classes: int) -> nn.Module:
         raise AttributeError(
             f"models/{name}.py must define build_model(num_classes) -> nn.Module"
         )
-    model = module.build_model(num_classes)
+    model = module.build_model(num_classes, **kwargs)
     if not isinstance(model, nn.Module):
         raise TypeError(
             f"models/{name}.build_model must return an nn.Module, got {type(model)}"

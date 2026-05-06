@@ -272,94 +272,135 @@ def build_dataloaders(
     soundscapes_dir : str,
     soundscapes_csv : str,
     val_size        : float = 0.15,
+    test_size       : float = 0.15,
     batch_size      : int   = 32,
     num_workers     : int   = 4,
     random_state    : int   = 42,
     duration_cache_path: str | None = None,
     verbose_data    : bool  = False,
+    min_recordings  : int | None = None,
 ):
-    """
-    Builds train and validation DataLoaders from both data sources combined.
+    """Builds train / val / test DataLoaders from both data sources.
 
-    The validation set is drawn only from train_audio (clean, single-label)
-    to keep evaluation simple and consistent. The soundscape samples are
-    added to the training set only, since they represent the real-world
-    distribution we want the model to learn from — not to be evaluated on
-    using our internal metric.
+    Split strategy (PROBLEMSETTING.md §Evaluation Protocol):
+      - Deterministic 70 / 15 / 15 stratified split by primary_label.
+      - Soundscape segments are added to the training set only.
+      - Val and test sets come exclusively from clean single-label train_audio.
+      - mlb is fit on the *full* df so all species are covered.
 
     Args:
-        metadata_csv    : path to train_metadata.csv
+        metadata_csv    : path to train.csv
         audio_dir       : path to train_audio/ folder
         soundscapes_dir : path to train_soundscapes/ folder
         soundscapes_csv : path to train_soundscapes_labels.csv
-        val_size        : fraction of train_audio to hold out for validation
+        val_size        : fraction of total recordings held out for validation
+        test_size       : fraction of total recordings held out for final testing
         batch_size      : DataLoader batch size
         num_workers     : parallel workers for data loading
-        random_state    : random seed for reproducibility
-        duration_cache_path: JSON file for train_audio duration cache (default:
-            <repo>/.cache/birdclef/train_audio_durations.json)
-        verbose_data    : extra cache / I/O print
+        random_state    : random seed — same seed guarantees identical splits
+        duration_cache_path: JSON file for train_audio duration cache
+        verbose_data    : extra cache / I/O output
+        min_recordings  : if set, restrict to species with at least this many
+                          recordings (PROBLEMSETTING §Scope fallback, K=69 at
+                          threshold 200). Applied before splitting; mlb is
+                          fit on the filtered df so K reflects the subset.
 
     Returns:
-        train_loader, val_loader, label_encoder (MultiLabelBinarizer)
+        train_loader, val_loader, test_loader, label_encoder (MultiLabelBinarizer)
     """
 
     # ── 1. Load train_audio metadata ─────────────────────────────────────────
     df = pd.read_csv(metadata_csv)
     print(f"train_audio — recordings: {len(df)}, species: {df['primary_label'].nunique()}")
 
-    # ── 2. Stratified split of train_audio into train / val ──────────────────
-    # Val set comes only from train_audio for clean, consistent evaluation
+    # ── 2. Optional species-count filter (HP search / compute budget) ─────────
+    if min_recordings is not None and min_recordings > 1:
+        counts_all = df["primary_label"].value_counts()
+        keep = counts_all[counts_all >= min_recordings].index
+        df = df[df["primary_label"].isin(keep)].reset_index(drop=True)
+        print(
+            f"min_recordings={min_recordings}: retained {len(keep)} species, "
+            f"{len(df)} recordings"
+        )
+
+    # ── 3. Stratified 3-way split ─────────────────────────────────────────────
+    # Classes with only 1 recording cannot be stratified — move to train only.
     counts = df["primary_label"].value_counts()
     singleton_species = counts[counts < 2].index
     df_main = df[~df["primary_label"].isin(singleton_species)]
     df_singletons = df[df["primary_label"].isin(singleton_species)]
 
-    train_df, val_df = train_test_split(
+    # First cut: carve out test set.
+    train_val_df, test_df = train_test_split(
         df_main,
-        test_size=val_size,
+        test_size=test_size,
         stratify=df_main["primary_label"],
         random_state=random_state,
     )
+
+    # Second cut: split remainder into train / val.
+    # Adjust val fraction so the absolute val size equals val_size of full df.
+    adjusted_val = val_size / (1.0 - test_size)
+    # Guard against rounding — clamp to a valid range.
+    adjusted_val = max(0.01, min(adjusted_val, 0.99))
+    train_df, val_df = train_test_split(
+        train_val_df,
+        test_size=adjusted_val,
+        stratify=train_val_df["primary_label"],
+        random_state=random_state,
+    )
+
     if len(df_singletons) > 0:
         train_df = pd.concat([train_df, df_singletons], ignore_index=True)
         print(
-            f"Stratified split note — moved singleton classes to train only: "
-            f"{len(df_singletons)} recordings across {df_singletons['primary_label'].nunique()} species"
+            f"Singleton classes moved to train only: "
+            f"{len(df_singletons)} recordings, {df_singletons['primary_label'].nunique()} species"
         )
-    print(f"train_audio split — train: {len(train_df)}, val: {len(val_df)}")
 
-    # ── 3. Fit label encoder on ALL species in train_audio ───────────────────
-    # We fit on the full df (before split) so val species are always covered.
-    # Soundscape species not in train_audio are silently ignored at label
-    # building time (see the 'known_labels' filter in __getitem__).
+    total = len(train_df) + len(val_df) + len(test_df)
+    print(
+        f"Split — train: {len(train_df)} ({len(train_df)/total:.0%}), "
+        f"val: {len(val_df)} ({len(val_df)/total:.0%}), "
+        f"test: {len(test_df)} ({len(test_df)/total:.0%})  "
+        f"[seed={random_state}]"
+    )
+
+    # ── 4. Fit label encoder on the (filtered) full df ────────────────────────
+    # Fit before split so val/test species are always in the label space.
     mlb = MultiLabelBinarizer()
     mlb.fit([[s] for s in sorted(df['primary_label'].unique())])
     print(f"Number of classes K: {len(mlb.classes_)}")
 
-    # ── 4. Build sample lists ─────────────────────────────────────────────────
-    train_audio_samples     = build_samples_from_train_audio(
+    # ── 5. Build sample lists ─────────────────────────────────────────────────
+    train_audio_samples = build_samples_from_train_audio(
         train_df, audio_dir, duration_cache_path, verbose_data, "train"
     )
-    soundscape_samples      = build_samples_from_soundscapes(
+    soundscape_samples = build_samples_from_soundscapes(
         soundscapes_csv, soundscapes_dir
     )
-    val_samples             = build_samples_from_train_audio(
+    val_samples = build_samples_from_train_audio(
         val_df, audio_dir, duration_cache_path, verbose_data, "val"
+    )
+    test_samples = build_samples_from_train_audio(
+        test_df, audio_dir, duration_cache_path, verbose_data, "test"
     )
 
     # Training set = clean recordings + real-world soundscapes
     train_samples = train_audio_samples + soundscape_samples
-    print(f"Training samples  — audio chunks: {len(train_audio_samples)}, "
-          f"soundscape segments: {len(soundscape_samples)}, "
-          f"total: {len(train_samples)}")
+    print(
+        f"Training samples  — audio chunks: {len(train_audio_samples)}, "
+        f"soundscape segments: {len(soundscape_samples)}, "
+        f"total: {len(train_samples)}"
+    )
     print(f"Validation samples: {len(val_samples)}")
+    print(f"Test samples      : {len(test_samples)}")
 
-    # ── 5. Build Dataset objects ──────────────────────────────────────────────
+    # ── 6. Build Dataset objects ──────────────────────────────────────────────
     train_dataset = BirdCLEFDataset(train_samples, mlb, augment=True)
     val_dataset   = BirdCLEFDataset(val_samples,   mlb, augment=False)
+    test_dataset  = BirdCLEFDataset(test_samples,  mlb, augment=False)
 
-    # ── 6. Build DataLoaders ──────────────────────────────────────────────────
+    # ── 7. Build DataLoaders ──────────────────────────────────────────────────
     train_loader = DataLoader(
         train_dataset,
         batch_size  = batch_size,
@@ -374,8 +415,15 @@ def build_dataloaders(
         num_workers = num_workers,
         pin_memory  = True,
     )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size  = batch_size,
+        shuffle     = False,
+        num_workers = num_workers,
+        pin_memory  = True,
+    )
 
-    return train_loader, val_loader, mlb
+    return train_loader, val_loader, test_loader, mlb
 
 
 # ─────────────────────────────────────────────

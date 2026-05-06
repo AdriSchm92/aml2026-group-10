@@ -19,6 +19,11 @@ Kaggle: auto-detects /kaggle/input and /kaggle/working. Renku: often
 
 ``python train.py --model cnn_baseline`` — smoke: ``--limit_train_batches 4 --epochs 1``
 Default: AMP on (CUDA), ``--no-amp`` for FP32; ``--batch_size`` 64, ``--num_workers`` 6.
+
+CNN warm-start (``cnn_transformer`` only):
+  Auto-loads CNN front-end weights from ``best_cnn_baseline.pt`` if it exists in the
+  output dir (same convergence gain as transfer learning, principled starting point).
+  Override with ``--init_from <path>``. Disable with ``--no_init``.
 """
 from __future__ import annotations
 
@@ -51,6 +56,10 @@ class TrainingRunSummary(TypedDict):
     checkpoint: str
     metrics: str
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Path resolution helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _default_stash_path() -> Path:
     env = (os.environ.get("BIRDCLEF_STASH_DIR") or "").strip()
@@ -129,6 +138,59 @@ def resolve_output_dir(cli_path: str | None, data_root: Path) -> Path:
     return out
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CNN warm-start helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _warmstart_cnn_frontend(model: nn.Module, ckpt_path: Path) -> None:
+    """Load CNN front-end weights from a cnn_baseline checkpoint into model.cnn.
+
+    Keys from the baseline checkpoint that share names with model.cnn are loaded
+    with strict=False so shape mismatches (e.g. different num_cnn_blocks) are
+    skipped rather than raising. Loaded / skipped counts are printed.
+    """
+    print(f"CNN warm-start: loading from {ckpt_path}")
+    ckpt = torch.load(ckpt_path, map_location="cpu")
+    baseline_sd = ckpt.get("model_state", {})
+
+    # The cnn_baseline is a plain ResNet-18; its state dict has no prefix.
+    # model.cnn is the timm features_only sub-module: keys look like "layer1.0.conv1.weight".
+    # The baseline ResNet-18 has identical key names for the same layers.
+    try:
+        target_sd = model.cnn.state_dict()
+    except AttributeError:
+        print("  CNN warm-start skipped: model has no .cnn attribute.")
+        return
+
+    filtered: dict[str, torch.Tensor] = {}
+    skipped_shape: list[str] = []
+    skipped_missing: list[str] = []
+
+    for k, v in baseline_sd.items():
+        if k not in target_sd:
+            skipped_missing.append(k)
+            continue
+        if v.shape != target_sd[k].shape:
+            skipped_shape.append(k)
+            continue
+        filtered[k] = v
+
+    load_result = model.cnn.load_state_dict(filtered, strict=False)
+    n_loaded = len(filtered)
+    n_total = len(target_sd)
+    print(
+        f"  Loaded {n_loaded}/{n_total} tensors into model.cnn "
+        f"(missing_in_src={len(skipped_missing)}, shape_mismatch={len(skipped_shape)}, "
+        f"missing_in_model={len(load_result.missing_keys)})"
+    )
+    if skipped_shape:
+        print(f"  Shape mismatch (skipped): {skipped_shape[:5]}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Argument parsing
+# ─────────────────────────────────────────────────────────────────────────────
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="BirdCLEF 2026 training harness")
     p.add_argument("--data_root", default=None,
@@ -140,12 +202,24 @@ def parse_args() -> argparse.Namespace:
                    help="Name of a file in models/ (e.g. cnn_baseline, "
                         "vit_baseline, cnn_transformer). Each such file must "
                         "define build_model(num_classes) -> nn.Module.")
+    p.add_argument("--model_kwargs", default=None,
+                   help='JSON string of keyword args forwarded to build_model. '
+                        'E.g. \'{"d_model": 128, "n_layers": 2}\'. '
+                        'Used by hp_search.py to vary architecture HPs.')
     p.add_argument("--epochs", type=int, default=5)
     p.add_argument("--batch_size", type=int, default=64)
     p.add_argument("--num_workers", type=int, default=6)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--weight_decay", type=float, default=1e-4)
-    p.add_argument("--val_size", type=float, default=0.15)
+    p.add_argument("--val_size", type=float, default=0.15,
+                   help="Fraction of recordings held out for validation.")
+    p.add_argument("--test_size", type=float, default=0.15,
+                   help="Fraction of recordings held out for the final test set. "
+                        "The test loader is built but never used during training.")
+    p.add_argument("--data_subset_min_recordings", type=int, default=None,
+                   help="Restrict training to species with at least N recordings "
+                        "(PROBLEMSETTING §Scope fallback). K=69 at N=200. "
+                        "Recommended for HP search to reduce compute.")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
         "--amp",
@@ -165,10 +239,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--warmup_epochs", type=int, default=0,
                    help="Linear LR warmup epochs before cosine decay. "
                         "0 = disabled (original CosineAnnealingLR). "
-                        "Recommended: 5 for ViT models.")
+                        "Recommended: 5 for ViT and cnn_transformer models.")
     p.add_argument("--label_smoothing", type=float, default=0.0,
                    help="Label smoothing for BCEWithLogitsLoss. "
-                        "0 = disabled. Recommended: 0.1 for ViT models.")
+                        "0 = disabled. Recommended: 0.1 for ViT/Transformer models.")
     p.add_argument("--tag", default=None,
                    help="Optional suffix for checkpoint filename.")
     p.add_argument(
@@ -176,8 +250,22 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Extra duration-cache / dataloader details.",
     )
+    # ── CNN warm-start (cnn_transformer only) ─────────────────────────────────
+    p.add_argument("--init_from", default=None,
+                   help="Explicit path to a cnn_baseline checkpoint for CNN "
+                        "front-end warm-start. Defaults to best_cnn_baseline.pt "
+                        "in the output dir when --model=cnn_transformer.")
+    p.add_argument(
+        "--no_init",
+        action="store_true",
+        help="Disable CNN warm-start even if best_cnn_baseline.pt exists.",
+    )
     return p.parse_args()
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Training loop helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
 def run_epoch(model, loader, optimizer, criterion, scaler, device, args):
     model.train()
@@ -223,8 +311,12 @@ def cap_loader(loader, limit):
     return batches
 
 
-def main() -> TrainingRunSummary:
-    args = parse_args()
+# ─────────────────────────────────────────────────────────────────────────────
+# Main training function — callable from hp_search.py
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_training(args: argparse.Namespace) -> TrainingRunSummary:
+    """Full training loop. Called by CLI __main__ and hp_search.py."""
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
@@ -240,20 +332,31 @@ def main() -> TrainingRunSummary:
         )
     print(f"ARGS       : {vars(args)}")
 
+    # ── Parse optional model kwargs (architecture HPs for cnn_transformer) ───
+    model_kwargs: dict = {}
+    if getattr(args, "model_kwargs", None):
+        try:
+            model_kwargs = json.loads(args.model_kwargs)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"--model_kwargs is not valid JSON: {args.model_kwargs}") from e
+
     t0 = time.perf_counter()
-    train_loader, val_loader, mlb = build_dataloaders(
+    train_loader, val_loader, test_loader, mlb = build_dataloaders(
         metadata_csv=str(data_root / "train.csv"),
         audio_dir=str(data_root / "train_audio"),
         soundscapes_dir=str(data_root / "train_soundscapes"),
         soundscapes_csv=str(data_root / "train_soundscapes_labels.csv"),
         val_size=args.val_size,
+        test_size=getattr(args, "test_size", 0.15),
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         random_state=args.seed,
         duration_cache_path=(os.environ.get("BIRDCLEF_DURATION_CACHE") or None),
         verbose_data=args.verbose_data,
+        min_recordings=getattr(args, "data_subset_min_recordings", None),
     )
     print(f"build_dataloaders: {time.perf_counter() - t0:.2f}s  (DataLoader num_workers={args.num_workers})")
+    print(f"Test set size     : {len(test_loader.dataset)} samples (held out — not used during training)")
 
     _, sc_val_loader = build_soundscape_val_loader(
         soundscapes_csv=str(data_root / "train_soundscapes_labels.csv"),
@@ -271,7 +374,22 @@ def main() -> TrainingRunSummary:
     print(f"device     : {device}")
     print(f"models     : available={available_models()}  selected={args.model}")
 
-    model = load_model(args.model, num_classes).to(device)
+    model = load_model(args.model, num_classes, **model_kwargs).to(device)
+
+    # ── CNN warm-start (cnn_transformer only) ─────────────────────────────────
+    if args.model == "cnn_transformer" and not getattr(args, "no_init", False):
+        init_path: Path | None = None
+        if getattr(args, "init_from", None):
+            init_path = Path(args.init_from)
+        else:
+            candidate = output_dir / "best_cnn_baseline.pt"
+            if candidate.is_file():
+                init_path = candidate
+        if init_path is not None and init_path.is_file():
+            _warmstart_cnn_frontend(model, init_path)
+        elif getattr(args, "init_from", None):
+            print(f"CNN warm-start: --init_from path not found: {args.init_from}. Skipping.")
+
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
     )
@@ -356,6 +474,7 @@ def main() -> TrainingRunSummary:
                     "val_auc": auc,
                     "val_f1": f1,
                     "args": vars(args),
+                    "model_kwargs": model_kwargs,
                 },
                 ckpt_path,
             )
@@ -371,6 +490,15 @@ def main() -> TrainingRunSummary:
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CLI entry point
+# ─────────────────────────────────────────────────────────────────────────────
+
+def main() -> TrainingRunSummary:
+    args = parse_args()
+    return run_training(args)
+
+
 if __name__ == "__main__":
     import signal
     import traceback
@@ -382,7 +510,6 @@ if __name__ == "__main__":
             pass
 
     def _on_sigterm(_signum: int, _frame) -> None:
-        # Job schedulers (e.g. Renku/K8s) often send SIGTERM, not SIGINT; no KeyboardInterrupt.
         training_event("cancelled (SIGTERM)", "Process received SIGTERM (stop/kill from scheduler).")
         raise SystemExit(143)  # 128 + 15
 

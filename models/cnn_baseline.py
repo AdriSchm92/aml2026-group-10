@@ -10,7 +10,7 @@ import timm
 import torch.nn as nn
 
 
-def build_model(num_classes: int) -> nn.Module:
+def build_model(num_classes: int, **_ignored) -> nn.Module:
     return timm.create_model(
         "resnet18",
         in_chans=1,

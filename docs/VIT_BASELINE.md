@@ -1,6 +1,6 @@
 # ViT Baseline Results (ViT-Small/16)
 
-**Role in project:** "ViT baseline" — see [PROBLEMSETTING.md](PROBLEMSETTING.md#baselines)
+**Role in project:** "ViT baseline" — see [PROBLEMSETTING.md](../PROBLEMSETTING.md#baselines)
 
 Architecture: ViT-Small, patch 16×16, `img_size=(128, 320)`, `in_chans=1`, trained from scratch.  
 Input (1, 128, 313) zero-padded to (1, 128, 320) → 8×20 = **160 tokens** + [CLS].  
@@ -43,4 +43,4 @@ Delta isolates the value of CNN inductive bias (local time-frequency features) o
 
 ## Next comparison models
 
-1. `cnn_transformer` — CNN front-end + Transformer encoder (main proposed model)
+1. `cnn_transformer` — CNN front-end + Transformer encoder (main proposed model) — [docs/CNN_TRANSFORMER.md](CNN_TRANSFORMER.md)
