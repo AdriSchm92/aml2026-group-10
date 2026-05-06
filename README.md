@@ -34,6 +34,20 @@ Use the attached SwitchDrive for persistant storage:
 On Renku, download the kaggle dataset directly this is quicker than the connection to SwitchDrive
 Either with this [script](scripts/stash_birdclef_data.py) or kaggle competitions download -c birdclef-2026
 
+### Renku: GPU / PyTorch fix
+
+Renku's Paketo buildpack bakes a pre-installed torch (CUDA 13) into a read-only layer that shadows anything `pip install` puts in the venv. The bundled torch requires a newer NVIDIA driver than the cluster provides (driver supports CUDA 12.4 max), so `torch.cuda.is_available()` returns `False` out of the box.
+
+**Workaround — prepend the venv to `PYTHONPATH` once per session:**
+
+```bash
+export PYTHONPATH=/home/renku/work/.venv/lib/python3.11/site-packages:$PYTHONPATH
+pip install torch==2.6.0+cu124 torchvision==0.21.0+cu124 torchaudio==2.6.0+cu124 \
+  --index-url https://download.pytorch.org/whl/cu124 --force-reinstall --no-cache-dir
+```
+
+After this `torch.cuda.is_available()` returns `True`. Add the `export` to `~/.bashrc` to avoid repeating it each session. The buildpack layer is read-only so `pip uninstall` of the old torch will fail — that is expected.
+
 When adding models use train.py and create file under /models/.
 
 Example for CNN:
