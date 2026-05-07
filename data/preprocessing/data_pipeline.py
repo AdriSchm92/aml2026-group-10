@@ -439,7 +439,7 @@ if __name__ == "__main__":
     SOUNDSCAPES_DIR = f"{DATA_DIR}/train_soundscapes"
     SOUNDSCAPES_CSV = f"{DATA_DIR}/train_soundscapes_labels.csv"
 
-    train_loader, val_loader, mlb = build_dataloaders(
+    train_loader, val_loader, test_loader, mlb = build_dataloaders(
         metadata_csv    = METADATA_CSV,
         audio_dir       = AUDIO_DIR,
         soundscapes_dir = SOUNDSCAPES_DIR,
