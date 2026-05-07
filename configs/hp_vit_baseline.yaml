@@ -1,13 +1,13 @@
 # HP search config for vit_baseline (PROBLEMSETTING.md §HP Tuning)
 #
-# ViT-Small architecture; patch size, depth, LR, and dropout are tuned.
-# Note: patch_size changes ViT token count — not exposed as a build_model kwarg
-# in the current vit_baseline.py (fixed at 16x16). To tune patch_size, extend
-# ViTBaseline.__init__ to accept it.
+# ViT-Small from scratch. Tunes dropout, LR, and weight decay.
+# drop_path_rate and drop_rate are forwarded to build_model via model_hp_keys.
 #
-# Budget target: 4 trials × 5 epochs × K=69 subset ≈ 4–6h on a single GPU.
+# Budget target: 6 trials × 5 epochs × K=69 subset ≈ 4–6h on a single GPU.
 
-model_hp_keys: []   # all HPs are trainer kwargs for this baseline
+model_hp_keys:
+  - drop_path_rate
+  - drop_rate
 
 fixed:
   epochs: 5
@@ -20,6 +20,7 @@ fixed:
 data_subset_min_recordings: 200
 
 hp_space:
+  drop_path_rate: [0.05, 0.1, 0.2]
+  drop_rate: [0.05, 0.1]
   lr: [1.0e-4, 3.0e-4, 1.0e-3]
   weight_decay: [1.0e-2, 5.0e-2]
-  dropout: [0.05, 0.1, 0.2]     # passed as label_smoothing proxy; extend model for dropout

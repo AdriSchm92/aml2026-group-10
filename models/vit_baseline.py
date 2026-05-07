@@ -6,6 +6,10 @@ Isolates the contribution of the CNN front-end vs the main CNN-Transformer model
 Input:  (B, 1, 128, 313)  — log-mel spectrogram, single channel
 Padded: (B, 1, 128, 320)  — 7 zero-frames appended to time axis
 Tokens: 8×20 = 160 patches of size 16×16, plus [CLS]
+
+Hyperparameters exposed through build_model() kwargs:
+  drop_path_rate : stochastic depth (default 0.1)
+  drop_rate      : dropout on the final representation (default 0.1)
 """
 from __future__ import annotations
 
@@ -16,7 +20,13 @@ import timm
 
 
 class ViTBaseline(nn.Module):
-    def __init__(self, num_classes: int) -> None:
+    def __init__(
+        self,
+        num_classes: int,
+        *,
+        drop_path_rate: float = 0.1,
+        drop_rate: float = 0.1,
+    ) -> None:
         super().__init__()
         self.vit = timm.create_model(
             "vit_small_patch16_224",
@@ -24,8 +34,8 @@ class ViTBaseline(nn.Module):
             img_size=(128, 320),
             num_classes=num_classes,
             pretrained=False,
-            drop_path_rate=0.1,
-            drop_rate=0.1,
+            drop_path_rate=drop_path_rate,
+            drop_rate=drop_rate,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -33,5 +43,11 @@ class ViTBaseline(nn.Module):
         return self.vit(x)
 
 
-def build_model(num_classes: int, **_ignored) -> nn.Module:
-    return ViTBaseline(num_classes)
+def build_model(
+    num_classes: int,
+    *,
+    drop_path_rate: float = 0.1,
+    drop_rate: float = 0.1,
+    **_ignored,
+) -> nn.Module:
+    return ViTBaseline(num_classes, drop_path_rate=drop_path_rate, drop_rate=drop_rate)

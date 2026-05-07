@@ -1,0 +1,36 @@
+# HP search config for pretrained_transformer.
+#
+# Fine-tuning a pretrained ViT requires lower LR and stronger regularisation
+# compared to training from scratch (vit_baseline). The warmup is critical —
+# skipping it on early epochs destroys the pretrained attention patterns.
+#
+# Budget target: 6 trials × 5 epochs × K=69 subset ≈ 4–6h on a single GPU.
+
+model_hp_keys:
+  - vit_model
+  - drop_path_rate
+  - drop_rate
+
+fixed:
+  epochs: 5
+  warmup_epochs: 3           # linear warmup before cosine — protect pretrained weights
+  label_smoothing: 0.1
+  batch_size: 64
+  num_workers: 10
+  grad_clip: 1.0
+  data_subset_min_recordings: 200   # K=69 species — fast HP search
+
+data_subset_min_recordings: 200
+
+hp_space:
+  # Architecture
+  vit_model:
+    - "vit_small_patch16_224"   # 22M params, 160 tokens — fast, strong baseline
+    - "vit_base_patch16_224"    # 86M params, 160 tokens — more expressive
+
+  drop_path_rate: [0.1, 0.2]
+  drop_rate: [0.05, 0.1]
+
+  # Optimiser — lower LR than from-scratch (vit_baseline uses 1e-4 to 1e-3)
+  lr: [3.0e-5, 1.0e-4, 3.0e-4]
+  weight_decay: [0.05, 0.1]

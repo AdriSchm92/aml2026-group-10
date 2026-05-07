@@ -12,7 +12,7 @@ Input `(1, 128, 313)` log-mel spectrogram, output `(K,)` per-class logits.
 
 | Component | Implementation | Notes |
 |---|---|---|
-| CNN front-end | `timm` ResNet-18, `features_only=True`, `out_indices=(2,)` | Default `num_cnn_blocks=3` → stride 8, `(B, 128, 16, 40)`, 640 tokens |
+| CNN front-end | Truncated ResNet-18 (`timm`, `features_only=True`, `out_indices=(2,)` by default) | `num_cnn_blocks=3` → stride 8, `(B, 128, 16, 40)`, 640 tokens. Override via `cnn_backbone` kwarg (e.g. `"efficientnet_b2"`) |
 | Channel projection | `Conv2d(C_cnn, d_model, 1)` + `BatchNorm2d` | Decouples transformer width from backbone width |
 | 2D pos embedding | `nn.Parameter(zeros(1, d_model, H', W'))`, `trunc_normal_(std=0.02)` | Preserves time×frequency spatial axes; one vector per grid cell |
 | `[CLS]` token | `nn.Parameter(zeros(1, 1, d_model))`, `trunc_normal_(std=0.02)` | Global representation extracted from position 0 of encoder output |
@@ -27,12 +27,14 @@ Input `(1, 128, 313)` log-mel spectrogram, output `(K,)` per-class logits.
 
 | HP | Default | Notes |
 |---|---|---|
-| `num_cnn_blocks` | 3 | ResNet-18 stage index; 3 → stride 8, 640 tokens; 4 → stride 16, 160 tokens |
+| `cnn_backbone` | `"resnet18"` | timm model name for CNN front-end. `"efficientnet_b2"` recommended for the final model. |
+| `pretrained_cnn` | `False` | ImageNet pretraining for CNN backbone. Set `True` for the final model; auto-skips warm-start from `cnn_baseline.pt`. |
+| `num_cnn_blocks` | 3 | Feature stage index; 3 → stride 8, 4 → stride 16. Exact token count depends on backbone. |
 | `d_model` | 256 | Transformer / projection width |
 | `n_heads` | 8 | Attention heads (`d_model` must be divisible) |
 | `n_layers` | 4 | Transformer encoder depth |
 | `dropout` | 0.1 | Applied in transformer layers and MLP head |
-| `lr` | 3e-4 | AdamW; lower than ResNet baseline due to Transformer sensitivity |
+| `lr` | 3e-4 | AdamW; pass explicitly — train.py default is 1e-3 |
 | `weight_decay` | 0.05 | AdamW; stronger regularisation standard for ViT-style models |
 | `warmup_epochs` | 5 | Linear warmup before cosine decay |
 | `label_smoothing` | 0.1 | Soft binary targets; standard for Transformer from-scratch training |
@@ -57,7 +59,7 @@ HP grid: `configs/hp_cnn_transformer.yaml` — covers `num_cnn_blocks`, `d_model
 
 ## Training
 
-### HP search + final retrain
+### HP search + final retrain (from-scratch ResNet-18 backbone)
 
 ```bash
 # Step 1: HP search on K=69 subset (~6–8h)
@@ -74,6 +76,24 @@ python train.py --model cnn_transformer \
     --compile \
     --output_dir /home/renku/work/kaggle-data/aml2026-group10-runs \
     --tag final
+```
+
+### Final model (EfficientNet-B2, pretrained CNN backbone)
+
+Uses ImageNet-pretrained EfficientNet-B2 as the CNN front-end. Warm-start from
+`best_cnn_baseline.pt` is automatically skipped when `pretrained_cnn=true`.
+Use lower LR (3e-5–1e-4) since pretrained weights need gentler fine-tuning.
+
+```bash
+python train.py --model cnn_transformer \
+    --model_kwargs '{"cnn_backbone": "efficientnet_b2", "pretrained_cnn": true, "d_model": 256, "n_layers": 4, "n_heads": 8}' \
+    --epochs 15 \
+    --lr 1e-4 --weight_decay 0.05 \
+    --warmup_epochs 5 --label_smoothing 0.1 \
+    --batch_size 128 --num_workers 10 \
+    --compile \
+    --output_dir /home/renku/work/kaggle-data/aml2026-group10-runs \
+    --tag final_pretrained
 ```
 
 ### CNN warm-start (default-on)

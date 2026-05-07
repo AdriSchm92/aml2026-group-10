@@ -16,6 +16,11 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 python scripts/stash_birdclef_data.py --kaggle-download
 ```
 
+Data and trained model weights are stored persistently on **SwitchDrive**:
+`https://drive.switch.ch/index.php/s/9cIBdwamXXtGHCQ`  
+Upload checkpoints (`best_*.pt`) and results (`metrics_*.jsonl`, `test_results_*.json`)
+there after each training run so the team can share them without re-running.
+
 ### Environment variables
 
 | Variable | Purpose | Default |
@@ -70,15 +75,27 @@ python train.py --model cnn_transformer \
 
 `--model_kwargs` is forwarded to `build_model(**kwargs)` via `models/registry.py`. Existing models accept and ignore unknown kwargs.
 
+### Per-model recommended hyperparameters
+
+| Model | `--lr` | `--weight_decay` | `--warmup_epochs` | `--label_smoothing` | Notes |
+|---|---|---|---|---|---|
+| `rf_baseline` | — | — | — | — | sklearn, see `train_rf.py` |
+| `cnn_baseline` | `1e-3` | `1e-4` | `0` | `0.0` | CosineAnnealingLR, no warmup needed |
+| `vit_baseline` | `3e-4` | `0.05` | `5` | `0.1` | Transformer from scratch; warmup critical |
+| `cnn_transformer` (from scratch) | `3e-4` | `0.05` | `5` | `0.1` | Explicitly pass `--lr 3e-4`; train.py default is `1e-3` |
+| `cnn_transformer` (pretrained CNN) | `1e-4` | `0.05` | `5` | `0.1` | Lower LR; pretrained weights need gentle fine-tuning |
+| `pretrained_transformer` | `1e-4` | `0.05` | `5` | `0.1` | Fine-tuning; warmup protects ImageNet weights |
+
 ### CNN warm-start (`cnn_transformer` only)
 
 When `--model cnn_transformer`, the CNN front-end is automatically warm-started from `best_cnn_baseline.pt` in the output dir if the file exists. This gives faster convergence with a principled initialisation.
 
-| Arg | Behaviour |
+| Arg / setting | Behaviour |
 |---|---|
 | _(default)_ | Auto-detect `best_cnn_baseline.pt` in output dir |
 | `--init_from <path>` | Explicit checkpoint path |
 | `--no_init` | Disable warm-start entirely |
+| `--model_kwargs '{"pretrained_cnn": true}'` | Auto-skips warm-start; CNN already has ImageNet weights |
 
 ---
 
@@ -146,7 +163,8 @@ Registry auto-discovers all files in `models/` (skips `registry.py`, `__init__.p
 
 | Name | Description | Status |
 |---|---|---|
-| `cnn_baseline` | ResNet-18 on mel-spectrograms | done — [CNN_BASELINE.md](CNN_BASELINE.md) |
-| `vit_baseline` | Pure ViT on raw spectrogram patches | run pending — [VIT_BASELINE.md](VIT_BASELINE.md) |
+| `cnn_baseline` | ResNet-18 or ResNet-34 on mel-spectrograms | done (85/15) — needs rerun on 70/15/15 — [CNN_BASELINE.md](CNN_BASELINE.md) |
+| `vit_baseline` | Pure ViT (from scratch) on raw spectrogram patches | preliminary results (85/15) — needs rerun — [VIT_BASELINE.md](VIT_BASELINE.md) |
 | `rf_baseline` | MFCC + Random Forest | run pending — [RF_BASELINE.md](RF_BASELINE.md) |
 | `cnn_transformer` | CNN front-end + Transformer encoder (main model) | implemented — [CNN_TRANSFORMER.md](CNN_TRANSFORMER.md) |
+| `pretrained_transformer` | Pretrained ViT fine-tuned on spectrograms | implemented — compare vs `vit_baseline` |

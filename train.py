@@ -387,17 +387,21 @@ def run_training(args: argparse.Namespace) -> TrainingRunSummary:
 
     # ── CNN warm-start (cnn_transformer only) ─────────────────────────────────
     if args.model == "cnn_transformer" and not getattr(args, "no_init", False):
-        init_path: Path | None = None
-        if getattr(args, "init_from", None):
-            init_path = Path(args.init_from)
+        if model_kwargs.get("pretrained_cnn", False):
+            # CNN already has ImageNet weights — don't overwrite with baseline checkpoint.
+            print("CNN warm-start: skipped (pretrained_cnn=True, ImageNet weights already loaded).")
         else:
-            candidate = output_dir / "best_cnn_baseline.pt"
-            if candidate.is_file():
-                init_path = candidate
-        if init_path is not None and init_path.is_file():
-            _warmstart_cnn_frontend(model, init_path)
-        elif getattr(args, "init_from", None):
-            print(f"CNN warm-start: --init_from path not found: {args.init_from}. Skipping.")
+            init_path: Path | None = None
+            if getattr(args, "init_from", None):
+                init_path = Path(args.init_from)
+            else:
+                candidate = output_dir / "best_cnn_baseline.pt"
+                if candidate.is_file():
+                    init_path = candidate
+            if init_path is not None and init_path.is_file():
+                _warmstart_cnn_frontend(model, init_path)
+            elif getattr(args, "init_from", None):
+                print(f"CNN warm-start: --init_from path not found: {args.init_from}. Skipping.")
 
     # ── torch.compile (PyTorch 2+, CUDA only) ─────────────────────────────────
     if getattr(args, "compile", False) and device.type == "cuda":

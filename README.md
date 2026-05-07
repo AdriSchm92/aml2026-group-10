@@ -95,11 +95,12 @@ aml2026-group-10/
 ├── evaluate.py                # val + test evaluation (--split val|test)
 ├── train_rf.py                # Random Forest training (separate due to sklearn API)
 ├── models/
-│   ├── cnn_transformer.py     # main proposed model
-│   ├── vit_baseline.py        # ViT baseline
-│   ├── cnn_baseline.py        # ResNet-18 baseline
-│   ├── rf_baseline.py         # MFCC + Random Forest baseline
-│   └── registry.py            # auto-discovery + kwargs forwarding
+│   ├── cnn_transformer.py         # main proposed model (configurable CNN backbone + Transformer)
+│   ├── pretrained_transformer.py  # pretrained ViT fine-tuning experiment
+│   ├── vit_baseline.py            # ViT from scratch baseline
+│   ├── cnn_baseline.py            # ResNet-18 / ResNet-34 baseline
+│   ├── rf_baseline.py             # MFCC + Random Forest baseline
+│   └── registry.py                # auto-discovery + kwargs forwarding
 ├── data/
 │   └── preprocessing/
 │       └── data_pipeline.py   # mel-spectrogram, 3-way split, DataLoaders

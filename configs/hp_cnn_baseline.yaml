@@ -1,12 +1,14 @@
 # HP search config for cnn_baseline (PROBLEMSETTING.md §HP Tuning)
 #
-# ResNet-18 baseline. Tunes LR and augmentation strength.
-# Depth (ResNet-18 vs ResNet-34) could be added by extending cnn_baseline.py
-# to accept a model_name kwarg.
+# ResNet baseline. Tunes depth (ResNet-18 vs ResNet-34), LR, and weight decay.
+# Per PROBLEMSETTING §HP Tuning: "depth (ResNet-18 vs. ResNet-34), learning rate,
+# augmentation strategy."
 #
-# Budget target: 4 trials × 3 epochs × K=69 subset ≈ 2–3h on a single GPU.
+# Budget target: 6 trials × 3 epochs × K=69 subset ≈ 2–3h on a single GPU.
 
-model_hp_keys: []
+# resnet_variant is a model kwarg (forwarded via --model_kwargs to build_model).
+model_hp_keys:
+  - resnet_variant
 
 fixed:
   epochs: 3
@@ -19,5 +21,6 @@ fixed:
 data_subset_min_recordings: 200
 
 hp_space:
+  resnet_variant: ["resnet18", "resnet34"]
   lr: [3.0e-4, 1.0e-3, 3.0e-3]
   weight_decay: [1.0e-5, 1.0e-4, 1.0e-3]

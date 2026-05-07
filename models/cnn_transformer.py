@@ -1,7 +1,7 @@
 """CNN-Transformer hybrid (PROBLEMSETTING.md §Proposed Architecture).
 
 Architecture:
-  1. CNN front-end  — truncated ResNet-18 extracts local time-frequency features.
+  1. CNN front-end  — configurable timm backbone extracts local time-frequency features.
   2. 1×1 projection — maps CNN channels to d_model independently of backbone width.
   3. 2D learnable positional embedding — preserves time×frequency spatial structure.
   4. [CLS] token + Transformer encoder — models global long-range dependencies.
@@ -11,8 +11,15 @@ Input:  (B, 1, 128, 313)  — log-mel spectrogram, single channel, 5-second clip
 Output: (B, K)            — K per-class logits (apply sigmoid for probabilities)
 
 Hyperparameters exposed through build_model() kwargs and wired to hp_search:
-  num_cnn_blocks  : which ResNet-18 feature stage to use as CNN output.
-                    2 → (C=64, H=32, W=79), 3 → (C=128, H=16, W=40), 4 → (C=256, H=8, W=20)
+  cnn_backbone    : any timm model name supporting features_only=True.
+                    "resnet18" (default, from scratch) or "efficientnet_b2" (recommended
+                    for the final model — stronger features, supports pretrained).
+  pretrained_cnn  : load ImageNet weights for the CNN backbone. Default False.
+                    Set True for the final model; skips warm-start from cnn_baseline.pt.
+  num_cnn_blocks  : which feature stage to use as CNN output.
+                    2 → stride 4, 3 → stride 8 (default), 4 → stride 16.
+                    Exact spatial size depends on backbone; determined at init via a
+                    dummy forward pass so no backbone-specific tables are needed.
   d_model         : transformer / projection width
   n_heads         : multi-head attention heads (must divide d_model)
   n_layers        : transformer encoder depth
@@ -20,16 +27,11 @@ Hyperparameters exposed through build_model() kwargs and wired to hp_search:
 """
 from __future__ import annotations
 
-import math
-
 import timm
 import torch
 import torch.nn as nn
 
 
-# ── ResNet-18 channel counts at each features_only stage ─────────────────────
-# Feature index: 0=stem+pool, 1=layer1, 2=layer2, 3=layer3, 4=layer4
-_RESNET18_CHANNELS = {0: 64, 1: 64, 2: 128, 3: 256, 4: 512}
 _VALID_CNN_BLOCKS = (2, 3, 4)
 
 
@@ -45,6 +47,8 @@ class CNNTransformer(nn.Module):
         n_heads: int = 8,
         n_layers: int = 4,
         dropout: float = 0.1,
+        cnn_backbone: str = "resnet18",
+        pretrained_cnn: bool = False,
     ) -> None:
         super().__init__()
         if num_cnn_blocks not in _VALID_CNN_BLOCKS:
@@ -52,25 +56,24 @@ class CNNTransformer(nn.Module):
                 f"num_cnn_blocks must be one of {_VALID_CNN_BLOCKS}, got {num_cnn_blocks}"
             )
         out_idx = num_cnn_blocks - 1
-        cnn_channels = _RESNET18_CHANNELS[out_idx]
 
         # ── 1. CNN front-end ──────────────────────────────────────────────────
-        # Truncated ResNet-18: stem(stride4) + layerN(stride2 each).
-        # out_indices selects which stage output to use as the feature map.
+        # Configurable backbone via timm features_only API. out_indices selects
+        # which stage to tap: 2=stride8 (default), 3=stride16, 4=stride32.
         self.cnn = timm.create_model(
-            "resnet18",
+            cnn_backbone,
             in_chans=1,
             features_only=True,
             out_indices=(out_idx,),
-            pretrained=False,
+            pretrained=pretrained_cnn,
         )
 
-        # Determine H', W' from a single dummy forward (avoids hardcoding for
-        # different input sizes and backbone variants).
+        # Determine C, H', W' via a dummy forward — works for any backbone
+        # without backbone-specific channel tables.
         with torch.no_grad():
             dummy = torch.zeros(1, 1, 128, 313)
             feat = self.cnn(dummy)[0]
-        _, _, H, W = feat.shape
+        _, cnn_channels, H, W = feat.shape
 
         # ── 2. Channel projection: C_cnn → d_model ───────────────────────────
         self.proj = nn.Conv2d(cnn_channels, d_model, kernel_size=1, bias=False)
@@ -164,6 +167,8 @@ def build_model(
     n_heads: int = 8,
     n_layers: int = 4,
     dropout: float = 0.1,
+    cnn_backbone: str = "resnet18",
+    pretrained_cnn: bool = False,
     **_ignored,
 ) -> nn.Module:
     return CNNTransformer(
@@ -173,4 +178,6 @@ def build_model(
         n_heads=n_heads,
         n_layers=n_layers,
         dropout=dropout,
+        cnn_backbone=cnn_backbone,
+        pretrained_cnn=pretrained_cnn,
     )
