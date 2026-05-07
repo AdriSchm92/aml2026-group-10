@@ -59,7 +59,8 @@ python scripts/stash_birdclef_data.py --kaggle-download
 python train.py --model cnn_baseline --epochs 1 --batch_size 8 --limit_train_batches 4
 
 # Train main model
-python train.py --model cnn_transformer --epochs 15 --warmup_epochs 5 --label_smoothing 0.1
+python train.py --model cnn_transformer --epochs 15 --warmup_epochs 5 --label_smoothing 0.1 \
+    --batch_size 256 --compile
 
 # HP search (6 trials, K=69 subset, ≤8h)
 python scripts/hp_search.py --model cnn_transformer

@@ -227,6 +227,13 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         help="Mixed precision on CUDA (default: on). --no-amp for FP32. Ignored on CPU.",
     )
+    p.add_argument(
+        "--compile",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help="torch.compile the model for faster training (PyTorch 2+, CUDA only). "
+             "First epoch ~30s slower due to compilation warmup.",
+    )
     p.add_argument("--limit_train_batches", type=int, default=None,
                    help="Cap batches/epoch for smoke tests.")
     p.add_argument("--limit_val_batches", type=int, default=None,
@@ -370,6 +377,8 @@ def run_training(args: argparse.Namespace) -> TrainingRunSummary:
 
     num_classes = len(mlb.classes_)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
     print(f"K          : {num_classes}")
     print(f"device     : {device}")
     print(f"models     : available={available_models()}  selected={args.model}")
@@ -389,6 +398,11 @@ def run_training(args: argparse.Namespace) -> TrainingRunSummary:
             _warmstart_cnn_frontend(model, init_path)
         elif getattr(args, "init_from", None):
             print(f"CNN warm-start: --init_from path not found: {args.init_from}. Skipping.")
+
+    # ── torch.compile (PyTorch 2+, CUDA only) ─────────────────────────────────
+    if getattr(args, "compile", False) and device.type == "cuda":
+        print("torch.compile: compiling model (first batch will be slow)...")
+        model = torch.compile(model)
 
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay

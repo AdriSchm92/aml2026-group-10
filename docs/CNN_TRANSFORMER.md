@@ -70,7 +70,8 @@ python train.py --model cnn_transformer \
     --epochs 15 \
     --lr 3e-4 --weight_decay 0.05 \
     --warmup_epochs 5 --label_smoothing 0.1 \
-    --batch_size 64 --num_workers 10 \
+    --batch_size 256 --num_workers 10 \
+    --compile \
     --output_dir /home/renku/work/kaggle-data/aml2026-group10-runs \
     --tag final
 ```
@@ -87,6 +88,20 @@ python train.py --model cnn_transformer \
     --model_kwargs '{"d_model": 64, "n_layers": 1, "n_heads": 4}' \
     --epochs 1 --batch_size 8 --limit_train_batches 4 --limit_val_batches 4
 ```
+
+### GPU utilization tips
+
+The default `--batch_size 64` uses only ~20% of an 8 GB GPU. Scale up for better utilization:
+
+| GPU VRAM | Recommended `--batch_size` | LR scaling vs. default (`lr * bs / 64`) |
+|---|---|---|
+| 8 GB | 256 | 4× base LR |
+| 16 GB | 512 | 8× base LR |
+| 24 GB+ | 512–1024 | 8–16× base LR |
+
+Add `--compile` for ~20–40% throughput gain (PyTorch 2+, CUDA only; first epoch ~30s slower due to compilation warmup).
+
+LR linear scaling rule: when changing batch size from the 64 baseline, multiply `--lr` by `new_batch_size / 64`. Combined with `--warmup_epochs 5`, this keeps training stable.
 
 ---
 
