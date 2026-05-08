@@ -108,6 +108,10 @@ def parse_args() -> argparse.Namespace:
                         "this budget is exhausted are skipped.")
     p.add_argument("--seed", type=int, default=0,
                    help="Random seed for HP sampling (separate from training seed).")
+    p.add_argument("--start_trial", type=int, default=0,
+                   help="Resume from this trial index (0-based). Skips already-done "
+                        "trials by fast-forwarding the RNG. Appends to existing "
+                        "hp_results file instead of truncating it.")
     p.add_argument("--data_root", default=None)
     p.add_argument("--output_dir", default=None,
                    help="Where checkpoints and HP results are written.")
@@ -147,9 +151,15 @@ def main() -> None:
     output_dir = resolve_output_dir(args.output_dir, data_root)
 
     results_path = output_dir / f"hp_results_{args.model}.jsonl"
-    results_path.write_text("")  # truncate / create
+    if args.start_trial > 0:
+        results_path.touch()   # append to existing file
+    else:
+        results_path.write_text("")  # truncate / create
 
     rng = random.Random(args.seed)
+    # Fast-forward RNG to reproduce the same sequence from start_trial onward.
+    for _ in range(args.start_trial):
+        _sample_config(hp_space, rng)
 
     print(f"HP search — model={args.model}, n_trials={args.n_trials}, "
           f"max_hours={args.max_hours:.1f}h, config={config_path}")
@@ -170,7 +180,7 @@ def main() -> None:
     wall_start = time.time()
     all_results: list[dict] = []
 
-    for trial_idx in range(args.n_trials):
+    for trial_idx in range(args.start_trial, args.n_trials):
         elapsed_h = (time.time() - wall_start) / 3600.0
         if elapsed_h >= args.max_hours:
             print(f"\nBudget exhausted ({elapsed_h:.2f}h >= {args.max_hours}h). "
