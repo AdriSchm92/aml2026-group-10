@@ -257,6 +257,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Extra duration-cache / dataloader details.",
     )
+    p.add_argument("--spec_cache_dir", default=os.environ.get("BIRDCLEF_SPEC_CACHE"),
+                   help="Local directory for pre-computed spectrogram cache. "
+                        "Set to a fast LOCAL path, e.g. /tmp/birdclef_specs. "
+                        "After the first epoch all subsequent epochs load ~1ms "
+                        "float16 .npy files instead of running librosa (~100ms/sample). "
+                        "Also reads BIRDCLEF_SPEC_CACHE env var.")
     # ── CNN warm-start (cnn_transformer only) ─────────────────────────────────
     p.add_argument("--init_from", default=None,
                    help="Explicit path to a cnn_baseline checkpoint for CNN "
@@ -361,6 +367,7 @@ def run_training(args: argparse.Namespace) -> TrainingRunSummary:
         duration_cache_path=(os.environ.get("BIRDCLEF_DURATION_CACHE") or None),
         verbose_data=args.verbose_data,
         min_recordings=getattr(args, "data_subset_min_recordings", None),
+        spec_cache_dir=getattr(args, "spec_cache_dir", None),
     )
     print(f"build_dataloaders: {time.perf_counter() - t0:.2f}s  (DataLoader num_workers={args.num_workers})")
     print(f"Test set size     : {len(test_loader.dataset)} samples (held out — not used during training)")

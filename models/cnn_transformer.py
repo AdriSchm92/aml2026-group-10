@@ -55,6 +55,11 @@ class CNNTransformer(nn.Module):
             raise ValueError(
                 f"num_cnn_blocks must be one of {_VALID_CNN_BLOCKS}, got {num_cnn_blocks}"
             )
+        if d_model % n_heads != 0:
+            raise ValueError(
+                f"d_model={d_model} must be divisible by n_heads={n_heads} "
+                f"(head_dim would be {d_model / n_heads:.1f})"
+            )
         out_idx = num_cnn_blocks - 1
 
         # ── 1. CNN front-end ──────────────────────────────────────────────────
@@ -118,7 +123,9 @@ class CNNTransformer(nn.Module):
 
     def _init_weights(self) -> None:
         """Standard ViT-style weight init for projection and head layers."""
-        nn.init.kaiming_normal_(self.proj.weight, mode="fan_out", nonlinearity="relu")
+        nn.init.trunc_normal_(self.proj.weight, std=0.02)
+        if self.proj.bias is not None:
+            nn.init.zeros_(self.proj.bias)
         for m in self.head.modules():
             if isinstance(m, nn.Linear):
                 nn.init.trunc_normal_(m.weight, std=0.02)

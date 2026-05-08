@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import tempfile
@@ -25,6 +26,46 @@ F_MAX         = 14000    # upper bound relevant for bird calls
 
 # Per-file librosa.get_duration is slow on network mounts; cache in repo .cache/
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+# ─────────────────────────────────────────────
+# SPECTROGRAM CACHE HELPERS
+# Pre-computed mel spectrograms saved as float16 .npy files on local disk.
+# Eliminates librosa.load + mel computation (50–200ms/sample) on every epoch.
+# Set spec_cache_dir to a LOCAL path (e.g. /tmp/birdclef_specs) — NOT a network
+# mount, or the cache defeats its own purpose.
+# ─────────────────────────────────────────────
+
+def _spec_cache_key(file_path: str, offset: float) -> str:
+    """Stable MD5 key from absolute path + offset seconds."""
+    raw = f"{os.path.abspath(file_path)}@{offset:.3f}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _load_spec_cache(cache_dir: str, key: str) -> np.ndarray | None:
+    path = os.path.join(cache_dir, key + ".npy")
+    try:
+        return np.load(path).astype(np.float32)
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+
+
+def _save_spec_cache(cache_dir: str, key: str, arr: np.ndarray) -> None:
+    """Atomic write so concurrent DataLoader workers never corrupt a cache file."""
+    os.makedirs(cache_dir, exist_ok=True)
+    dest = os.path.join(cache_dir, key + ".npy")
+    if os.path.exists(dest):
+        return
+    fd, tmp = tempfile.mkstemp(dir=cache_dir, prefix="spec.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            np.save(f, arr.astype(np.float16))
+        os.replace(tmp, dest)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 def _default_duration_cache_path() -> str:
@@ -79,33 +120,39 @@ class BirdCLEFDataset(Dataset):
       - label_vector: torch.Tensor of shape (K,) — multi-hot binary vector
     """
 
-    def __init__(self, samples, label_encoder, augment=False):
+    def __init__(self, samples, label_encoder, augment=False, spec_cache_dir=None):
         """
         Args:
-            samples      : list of dicts, each with keys:
-                             'file_path' : str   — path to .ogg file
-                             'offset'    : float — start time in seconds
-                             'labels'    : list  — list of species label strings
-            label_encoder: fitted MultiLabelBinarizer mapping species → index
-            augment      : if True, apply SpecAugment (training set only)
+            samples        : list of dicts, each with keys:
+                               'file_path' : str   — path to .ogg file
+                               'offset'    : float — start time in seconds
+                               'labels'    : list  — list of species label strings
+            label_encoder  : fitted MultiLabelBinarizer mapping species → index
+            augment        : if True, apply SpecAugment (training set only)
+            spec_cache_dir : local directory for float16 .npy spectrogram cache.
+                             Set to a fast LOCAL path (e.g. /tmp/birdclef_specs).
+                             Eliminates librosa.load + mel recomputation every epoch.
         """
-        self.samples       = samples
-        self.label_encoder = label_encoder
-        self.augment       = augment
-        self.n_classes     = len(label_encoder.classes_)
+        self.samples        = samples
+        self.label_encoder  = label_encoder
+        self.augment        = augment
+        self.n_classes      = len(label_encoder.classes_)
+        self._spec_cache_dir = spec_cache_dir
 
-        # SpecAugment: masks random frequency bands and time segments
-        # to make the model robust to missing or corrupted regions
+        # O(1) label → index lookup (np.where scan is O(K) per label per item)
+        self._class_set    = set(label_encoder.classes_)
+        self._class_to_idx = {c: i for i, c in enumerate(label_encoder.classes_)}
+
+        # SpecAugment: masks random frequency bands and time segments.
+        # Two masks of each type (per SpecAugment paper) for stronger regularisation.
         self.freq_mask = T.FrequencyMasking(freq_mask_param=24)
         self.time_mask = T.TimeMasking(time_mask_param=64)
 
     def __len__(self):
         return len(self.samples)
 
-    def __getitem__(self, idx):
-        sample = self.samples[idx]
-
-        # ── 1. Load the 5-second chunk ───────────────────────────────────────
+    def _compute_mel_db(self, sample) -> np.ndarray:
+        """Load audio chunk and return normalised (128, 313) float32 mel spectrogram."""
         y, _ = librosa.load(
             sample['file_path'],
             sr       = SAMPLE_RATE,
@@ -113,22 +160,32 @@ class BirdCLEFDataset(Dataset):
             duration = CLIP_DURATION,
             mono     = True,
         )
-
-        # ── 2. Pad if shorter than 5 seconds ─────────────────────────────────
-        # Happens for the last chunk of a recording that doesn't fill 5s fully
         target_len = SAMPLE_RATE * CLIP_DURATION
         if len(y) < target_len:
             y = np.pad(y, (0, target_len - len(y)), mode='constant')
-
-        # ── 3. Compute log-mel spectrogram → shape (128, 313) ────────────────
         mel    = librosa.feature.melspectrogram(
             y=y, sr=SAMPLE_RATE, n_fft=N_FFT,
             hop_length=HOP_LENGTH, n_mels=N_MELS, fmin=F_MIN, fmax=F_MAX,
         )
         mel_db = librosa.power_to_db(mel, ref=np.max)
-
-        # ── 4. Normalise to [0, 1] per clip ──────────────────────────────────
         mel_db = (mel_db - mel_db.min()) / (mel_db.max() - mel_db.min() + 1e-6)
+        return mel_db.astype(np.float32)
+
+    def __getitem__(self, idx):
+        sample = self.samples[idx]
+
+        # ── 1–4. Load / compute normalised mel spectrogram ───────────────────
+        # If a spec_cache_dir is set, serve from float16 .npy cache on first hit
+        # and populate it on miss.  Converts librosa's 50–200ms per sample into
+        # a ~1ms numpy load after the first epoch.
+        if self._spec_cache_dir is not None:
+            key    = _spec_cache_key(sample['file_path'], sample['offset'])
+            mel_db = _load_spec_cache(self._spec_cache_dir, key)
+            if mel_db is None:
+                mel_db = self._compute_mel_db(sample)
+                _save_spec_cache(self._spec_cache_dir, key, mel_db)
+        else:
+            mel_db = self._compute_mel_db(sample)
 
         # ── 5. Convert to tensor with channel dim → (1, 128, 313) ────────────
         spec = torch.tensor(mel_db, dtype=torch.float32).unsqueeze(0)
@@ -136,16 +193,17 @@ class BirdCLEFDataset(Dataset):
         # ── 6. Apply SpecAugment (training only) ─────────────────────────────
         if self.augment:
             spec = self.freq_mask(spec)
+            spec = self.freq_mask(spec)
+            spec = self.time_mask(spec)
             spec = self.time_mask(spec)
 
         # ── 7. Build multi-hot label vector ──────────────────────────────────
         # Works for both single-label (train_audio) and multi-label (soundscapes)
         # since sample['labels'] is always a list, even if it has one element
-        known_labels = [l for l in sample['labels'] if l in self.label_encoder.classes_]
+        known_labels = [l for l in sample['labels'] if l in self._class_set]
         label_vec    = torch.zeros(self.n_classes, dtype=torch.float32)
         if known_labels:
-            indices = [np.where(self.label_encoder.classes_ == l)[0][0]
-                       for l in known_labels]
+            indices = [self._class_to_idx[l] for l in known_labels]
             label_vec[indices] = 1.0
 
         return spec, label_vec
@@ -279,6 +337,7 @@ def build_dataloaders(
     duration_cache_path: str | None = None,
     verbose_data    : bool  = False,
     min_recordings  : int | None = None,
+    spec_cache_dir  : str | None = None,
 ):
     """Builds train / val / test DataLoaders from both data sources.
 
@@ -304,6 +363,9 @@ def build_dataloaders(
                           recordings (PROBLEMSETTING §Scope fallback, K=69 at
                           threshold 200). Applied before splitting; mlb is
                           fit on the filtered df so K reflects the subset.
+        spec_cache_dir  : local directory for pre-computed spectrogram cache.
+                          Must be a fast LOCAL path (e.g. /tmp/birdclef_specs),
+                          not a network mount. See BIRDCLEF_SPEC_CACHE env var.
 
     Returns:
         train_loader, val_loader, test_loader, label_encoder (MultiLabelBinarizer)
@@ -396,31 +458,36 @@ def build_dataloaders(
     print(f"Test samples      : {len(test_samples)}")
 
     # ── 6. Build Dataset objects ──────────────────────────────────────────────
-    train_dataset = BirdCLEFDataset(train_samples, mlb, augment=True)
-    val_dataset   = BirdCLEFDataset(val_samples,   mlb, augment=False)
-    test_dataset  = BirdCLEFDataset(test_samples,  mlb, augment=False)
+    if spec_cache_dir:
+        print(f"Spectrogram cache : {spec_cache_dir}")
+    train_dataset = BirdCLEFDataset(train_samples, mlb, augment=True,  spec_cache_dir=spec_cache_dir)
+    val_dataset   = BirdCLEFDataset(val_samples,   mlb, augment=False, spec_cache_dir=spec_cache_dir)
+    test_dataset  = BirdCLEFDataset(test_samples,  mlb, augment=False, spec_cache_dir=spec_cache_dir)
 
     # ── 7. Build DataLoaders ──────────────────────────────────────────────────
     train_loader = DataLoader(
         train_dataset,
-        batch_size  = batch_size,
-        shuffle     = True,
-        num_workers = num_workers,
-        pin_memory  = True,
+        batch_size         = batch_size,
+        shuffle            = True,
+        num_workers        = num_workers,
+        pin_memory         = True,
+        persistent_workers = num_workers > 0,
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size  = batch_size,
-        shuffle     = False,
-        num_workers = num_workers,
-        pin_memory  = True,
+        batch_size         = batch_size,
+        shuffle            = False,
+        num_workers        = num_workers,
+        pin_memory         = True,
+        persistent_workers = num_workers > 0,
     )
     test_loader = DataLoader(
         test_dataset,
-        batch_size  = batch_size,
-        shuffle     = False,
-        num_workers = num_workers,
-        pin_memory  = True,
+        batch_size         = batch_size,
+        shuffle            = False,
+        num_workers        = num_workers,
+        pin_memory         = True,
+        persistent_workers = num_workers > 0,
     )
 
     return train_loader, val_loader, test_loader, mlb

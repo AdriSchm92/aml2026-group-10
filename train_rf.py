@@ -177,6 +177,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--data_root", default=None)
     p.add_argument("--output_dir", default=None)
     p.add_argument("--val_size", type=float, default=0.15)
+    p.add_argument("--test_size", type=float, default=0.15,
+                   help="Held-out test fraction. Must match train.py --test_size "
+                        "so all models evaluate on the same split (PROBLEMSETTING §Evaluation Protocol).")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--n_mfcc", type=int, default=40,
                    help="MFCC feature dimension. Ignored when --tune is set.")
@@ -203,22 +206,40 @@ def main() -> None:
     print(f"OUTPUT_DIR : {output_dir}")
     print(f"ARGS       : {vars(args)}")
 
-    # ── Same stratified split as train.py ────────────────────────────────────
+    # ── Identical 3-way split to data_pipeline.py (PROBLEMSETTING §Evaluation Protocol) ──
+    # All models must share the same val and test samples for a fair comparison.
+    # Replicates the exact 2-step logic from build_dataloaders() with the same seed.
     df = pd.read_csv(data_root / "train.csv")
     counts = df["primary_label"].value_counts()
     singletons = counts[counts < 2].index
     df_main = df[~df["primary_label"].isin(singletons)]
     df_sing = df[df["primary_label"].isin(singletons)]
-    train_df, val_df = train_test_split(
-        df_main, test_size=args.val_size,
+
+    # Step 1: carve out test set (same call as data_pipeline.py step 1)
+    train_val_df, test_df = train_test_split(
+        df_main, test_size=args.test_size,
         stratify=df_main["primary_label"], random_state=args.seed,
+    )
+    # Step 2: split remainder into train / val (same adjusted fraction)
+    adjusted_val = args.val_size / (1.0 - args.test_size)
+    adjusted_val = max(0.01, min(adjusted_val, 0.99))
+    train_df, val_df = train_test_split(
+        train_val_df, test_size=adjusted_val,
+        stratify=train_val_df["primary_label"], random_state=args.seed,
     )
     if len(df_sing):
         train_df = pd.concat([train_df, df_sing], ignore_index=True)
 
+    total = len(train_df) + len(val_df) + len(test_df)
+    print(
+        f"Split — train: {len(train_df)} ({len(train_df)/total:.0%}), "
+        f"val: {len(val_df)} ({len(val_df)/total:.0%}), "
+        f"test: {len(test_df)} ({len(test_df)/total:.0%})  [seed={args.seed}]"
+    )
+
     mlb = MultiLabelBinarizer()
     mlb.fit([[s] for s in sorted(df["primary_label"].unique())])
-    print(f"K={len(mlb.classes_)}  train_recordings={len(train_df)}  val_recordings={len(val_df)}")
+    print(f"K={len(mlb.classes_)}  train_recordings={len(train_df)}  val_recordings={len(val_df)}  test_recordings={len(test_df)}")
 
     train_samples = build_samples_from_train_audio(
         train_df, str(data_root / "train_audio"), split_label="train"
@@ -226,7 +247,10 @@ def main() -> None:
     val_samples = build_samples_from_train_audio(
         val_df, str(data_root / "train_audio"), split_label="val"
     )
-    print(f"train_chunks={len(train_samples)}  val_chunks={len(val_samples)}")
+    test_samples = build_samples_from_train_audio(
+        test_df, str(data_root / "train_audio"), split_label="test"
+    )
+    print(f"train_chunks={len(train_samples)}  val_chunks={len(val_samples)}  test_chunks={len(test_samples)}")
 
     # ── HP grid ───────────────────────────────────────────────────────────────
     grid = HP_GRID if args.tune else [
@@ -273,8 +297,18 @@ def main() -> None:
             best_result = result
             print(f"  -> new best val_auc={best_auc:.4f}")
 
-    # ── Save best checkpoint ──────────────────────────────────────────────────
+    # ── Evaluate best model on held-out test set (PROBLEMSETTING §Evaluation Protocol) ──
     assert best_result is not None
+    best_n_mfcc = best_result["metrics"]["n_mfcc"]
+    X_test = extract_or_load(test_samples, best_n_mfcc, args.n_jobs,
+                             _cache_path("test", best_n_mfcc))
+    y_test = samples_to_labels(test_samples, mlb)
+    test_score = best_result["model"].predict_proba(X_test)
+    test_auc, _ = macro_roc_auc(y_test, test_score)
+    test_f1, _  = macro_f1_tuned(y_test, test_score, best_result["thresholds"])
+    print(f"\nTest set — test_auc={test_auc:.4f}  test_f1={test_f1:.4f}")
+
+    # ── Save best checkpoint ──────────────────────────────────────────────────
     ckpt_path = output_dir / f"best_rf_baseline{tag}.joblib"
     joblib.dump(
         {
@@ -282,11 +316,14 @@ def main() -> None:
             "mlb": mlb,
             "thresholds": best_result["thresholds"],
             "val_auc": best_auc,
+            "test_auc": test_auc,
+            "test_f1": test_f1,
             "hp": best_result["metrics"],
         },
         ckpt_path,
     )
     print(f"\nDone. Best val AUC : {best_auc:.4f}")
+    print(f"Test AUC           : {test_auc:.4f}")
     print(f"Checkpoint         : {ckpt_path}")
     print(f"Metrics            : {metrics_path}")
 

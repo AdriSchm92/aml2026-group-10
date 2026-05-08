@@ -80,6 +80,7 @@ def build_soundscape_val_loader(
         shuffle=True,
         num_workers=num_workers,
         pin_memory=True,
+        persistent_workers=num_workers > 0,
     )
     val_loader = DataLoader(
         val_ds,
@@ -87,6 +88,7 @@ def build_soundscape_val_loader(
         shuffle=False,
         num_workers=num_workers,
         pin_memory=True,
+        persistent_workers=num_workers > 0,
     )
 
     return train_loader, val_loader
