@@ -31,7 +31,7 @@ birdclef-env/
 *.wav
 *.mp3
 *.flac
-data/raw/
+data/raw data/
 
 # Training / duration cache (repo-local, not committed)
 .cache/
