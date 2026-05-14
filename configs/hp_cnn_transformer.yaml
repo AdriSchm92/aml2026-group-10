@@ -1,0 +1,46 @@
+# HP search config for cnn_transformer (PROBLEMSETTING.md §HP Tuning)
+#
+# Budget target: 6 trials × 3 epochs × K=69 subset ≈ 6–8h on a single GPU.
+# After picking best config, retrain from scratch on full data (K=206, ~15 epochs).
+#
+# Keys in model_hp_keys are forwarded to build_model(**kwargs).
+# All other hp_space keys are set as attributes on the argparse.Namespace
+# (i.e. directly to train.py CLI args).
+
+# Which hp_space keys are architecture kwargs (forwarded via --model_kwargs)
+# vs. trainer kwargs (set directly on the argparse Namespace).
+model_hp_keys:
+  - num_cnn_blocks
+  - d_model
+  - n_heads
+  - n_layers
+  - dropout
+
+# Fixed per-trial settings. These override the train.py defaults for every trial.
+# Keep epochs low for HP search; warmup and label_smoothing match Transformer best practice.
+fixed:
+  epochs: 3
+  warmup_epochs: 1          # short warmup proportional to trial epochs
+  label_smoothing: 0.1
+  batch_size: 64
+  num_workers: 10
+  grad_clip: 1.0
+  data_subset_min_recordings: 200   # K=69 species — fast HP search
+
+# Reduced-subset guard (also checked by hp_search.py if not set above)
+data_subset_min_recordings: 200
+
+# HP candidate grid (PROBLEMSETTING §HP Tuning: num_cnn_blocks, d_model, n_heads,
+# n_layers, dropout, lr, patch_size_after_CNN).
+# Each key maps to a list of candidates; hp_search.py samples uniformly.
+hp_space:
+  # Architecture
+  num_cnn_blocks: [3, 4]         # stride-8 (640 tokens) vs stride-16 (160 tokens)
+  d_model: [128, 256]            # transformer width
+  n_heads: [4, 8]                # must divide d_model; 128/4=32, 256/8=32 ✓
+  n_layers: [2, 4]               # transformer depth
+  dropout: [0.1, 0.2]
+
+  # Optimiser
+  lr: [1.0e-4, 3.0e-4, 1.0e-3]
+  weight_decay: [1.0e-4, 5.0e-2]
