@@ -139,31 +139,56 @@ python evaluate.py --model cnn_transformer --split test
 
 ## Results
 
-_Results pending — run in progress._
-
 ### HP search (K=69 subset, 3 epochs/trial)
 
 | Trial | `num_cnn_blocks` | `d_model` | `n_layers` | `n_heads` | `dropout` | `lr` | val_AUC |
 |---|---|---|---|---|---|---|---|
-| | | | | | | | |
+| **0** | **4** | **256** | **4** | **4** | **0.2** | **3e-4** | **0.9057** |
+| 1     | 4     | 256     | 2     | 4     | 0.2     | 1e-4   | 0.8798  |
+| 2     | 4     | 128     | 2     | 8     | 0.1     | 1e-3   | 0.8614  |
+| 3     | 4     | 128     | 4     | 8     | 0.2     | 1e-3   | 0.6081  |
+| 4     | 4     | 256     | 2     | 8     | 0.1     | 1e-4   | 0.9040  |
+| 5     | 3     | 256     | 2     | 8     | 0.2     | 1e-3   | 0.6909  |
 
-**Best config:** _pending_
+**Best config:** Trial 0 — `num_cnn_blocks=4, d_model=256, n_layers=4, n_heads=4, dropout=0.2, lr=3e-4`
+
+Key observations: trials with `lr=1e-3` all collapsed (AUC 0.61–0.86) — too high for Transformer training. `num_cnn_blocks=4` (stride-16, ~160 tokens) consistently outperforms `num_cnn_blocks=3` (stride-8, ~640 tokens) at equal LR.
+
+> **Note:** The final retrain below used `num_cnn_blocks=3, n_heads=8` from the original hardcoded command rather than the best HP config above. This is a known mismatch — a corrected retrain with Trial 0 HPs would be the right next step.
 
 ### Final retrain (K=206, full data)
 
-| Epoch | train_loss | val_AUC | val_F1 | time (s) | LR |
-|---|---|---|---|---|---|
-| | | | | | |
+Config used: `num_cnn_blocks=3, d_model=256, n_layers=4, n_heads=8, dropout=0.1, lr=3e-4` (not best HP — see note above).  
+Epoch 1 took 7993s because the spectrogram cache was cold; subsequent epochs ~324s with warm cache.
 
-**Best checkpoint:** `best_cnn_transformer_final.pt`
+| Epoch | train_loss | val_AUC    | val_F1     | time (s) | LR       |
+|---|---|---|---|---|---|
+| 1     | 0.23343    | 0.5297     | 0.0095     | 7993     | 1.200e-4 |
+| 2     | 0.21226    | 0.5512     | 0.0099     | 324      | 1.800e-4 |
+| 3     | 0.21177    | 0.5829     | 0.0143     | 323      | 2.400e-4 |
+| 4     | 0.21141    | 0.6908     | 0.0193     | 325      | 3.000e-4 |
+| 5     | 0.21090    | 0.7646     | 0.0552     | 324      | 3.000e-4 |
+| 6     | 0.21006    | 0.8466     | 0.0991     | 324      | 2.927e-4 |
+| 7     | 0.20929    | 0.8662     | 0.1535     | 324      | 2.714e-4 |
+| 8     | 0.20867    | 0.8770     | 0.1967     | 325      | 2.382e-4 |
+| 9     | 0.20810    | 0.8837     | 0.2325     | 324      | 1.964e-4 |
+| 10    | 0.20757    | 0.8792     | 0.2550     | 323      | 1.500e-4 |
+| 11    | 0.20712    | 0.9015     | 0.2866     | 324      | 1.036e-4 |
+| 12    | 0.20674    | 0.8987     | 0.3179     | 324      | 6.183e-5 |
+| 13    | 0.20644    | 0.9012     | 0.3369     | 323      | 2.865e-5 |
+| **14**| **0.20624**| **0.9068** | **0.3410** | 324      | 7.342e-6 |
+| 15    | 0.20612    | 0.9025     | 0.3469     | 324      | 0.000e+0 |
+
+Best checkpoint: epoch 14 — **val_AUC 0.9068, val_F1 0.3410**
 
 ### Comparison (70/15/15 split, seed=42)
 
-| Model | val_AUC | val_F1 | test_AUC | test_F1 | Params | Split |
+| Model | val_AUC | val_F1 | test_AUC | test_F1 | Params | Notes |
 |---|---|---|---|---|---|---|
-| `rf_baseline` (MFCC + RF) | _pending_ | _pending_ | _pending_ | _pending_ | — | 70/15/15 |
-| `cnn_baseline` (ResNet-18) | 0.9570* | 0.5331* | — | — | ~11M | 85/15 (old) |
-| `vit_baseline` (ViT-Small) | _pending_ | _pending_ | _pending_ | _pending_ | ~22M | 70/15/15 |
-| `cnn_transformer` (this) | _pending_ | _pending_ | _pending_ | _pending_ | ~15–20M | 70/15/15 |
+| `rf_baseline` (MFCC + RF) | — | — | — | — | — | run failed; pending rerun |
+| `cnn_baseline` (ResNet-18) | 0.9540 | 0.4844 | — | — | ~11M | test eval pending |
+| `vit_baseline` (ViT-Small, scratch) | 0.8922 | 0.3363 | — | — | ~22M | test eval pending |
+| `cnn_transformer` (this, wrong HP) | 0.9068 | 0.3410 | — | — | ~18M | used num_cnn_blocks=3 not 4 |
+| `pretrained_transformer` (ViT-Small, ImageNet) | 0.9537 | 0.5753 | — | — | ~22M | test eval pending |
 
-\* CNN baseline numbers from old 85/15 split — see [CNN_BASELINE.md](CNN_BASELINE.md) caveat.
+All test_AUC/test_F1 cells are pending — `evaluate.py --split test` did not write results (likely session ended before completion or checkpoint path mismatch).

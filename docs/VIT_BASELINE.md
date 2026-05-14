@@ -8,30 +8,48 @@ Loss: BCEWithLogitsLoss (label_smoothing=0.1). Optimizer: AdamW (lr=3e-4, wd=0.0
 Scheduler: 5-epoch linear warmup → cosine decay. SpecAugment.  
 ~22M params vs ResNet-18 ~11M — larger capacity needed for ViT to be competitive without CNN inductive bias.
 
-> **Note on split:** Preliminary numbers below are from the old **85/15** train/val split
-> (no held-out test set). All final comparisons must use the **70/15/15** split
-> (the current default). Rerun with the launch command below to get comparable numbers.
-
----
-
 ## Training Run
 
-### Preliminary results (85/15 split — needs rerun on 70/15/15)
+### Results (70/15/15 split, seed=42)
 
-| Epoch | train_loss | val_AUC | val_F1 | time (s) | LR |
-|-------|-----------|---------|--------|----------|----|
-| best  | —         | 0.9059  | 0.4060 | —        | —  |
+30 epochs, 5-epoch linear warmup → cosine decay. Spectrogram cache enabled (~480s/epoch).
 
-Best checkpoint (preliminary): **val_AUC 0.9059, val_F1 0.4060**
+| Epoch | train_loss | val_AUC    | val_F1     | time (s) | LR       |
+|-------|------------|------------|------------|----------|----------|
+| 1     | 0.22218    | 0.5411     | 0.0096     | 569      | 1.200e-4 |
+| 2     | 0.21168    | 0.6002     | 0.0128     | 479      | 1.800e-4 |
+| 3     | 0.21153    | 0.5775     | 0.0096     | 479      | 2.400e-4 |
+| 4     | 0.21142    | 0.6238     | 0.0155     | 480      | 3.000e-4 |
+| 5     | 0.21101    | 0.7275     | 0.0411     | 479      | 3.000e-4 |
+| 6     | 0.21041    | 0.8142     | 0.0877     | 480      | 2.988e-4 |
+| 7     | 0.20973    | 0.8488     | 0.1552     | 481      | 2.953e-4 |
+| 8     | 0.20900    | 0.8626     | 0.2063     | 480      | 2.895e-4 |
+| 9     | 0.20822    | 0.8760     | 0.2505     | 481      | 2.814e-4 |
+| 10    | 0.20741    | 0.8797     | 0.2843     | 481      | 2.714e-4 |
+| 11    | 0.20659    | 0.8855     | 0.3084     | 482      | 2.593e-4 |
+| **12**| **0.20580**| **0.8922** | **0.3363** | 483      | 2.456e-4 |
+| 13    | 0.20506    | 0.8922     | 0.3479     | 483      | 2.304e-4 |
+| 14    | 0.20444    | 0.8904     | 0.3592     | 483      | 2.139e-4 |
+| 15    | 0.20385    | 0.8894     | 0.3624     | 483      | 1.964e-4 |
+| 16    | 0.20333    | 0.8780     | 0.3726     | 483      | 1.781e-4 |
+| 17    | 0.20287    | 0.8797     | 0.3651     | 482      | 1.594e-4 |
+| 18    | 0.20249    | 0.8634     | 0.3801     | 483      | 1.406e-4 |
+| 19    | 0.20214    | 0.8762     | 0.3848     | 483      | 1.219e-4 |
+| 20    | 0.20182    | 0.8717     | 0.3811     | 483      | 1.036e-4 |
+| 21    | 0.20152    | 0.8648     | 0.3832     | 483      | 8.613e-5 |
+| 22    | 0.20127    | 0.8564     | 0.3823     | 483      | 6.963e-5 |
+| 23    | 0.20105    | 0.8595     | 0.3937     | 483      | 5.439e-5 |
+| 24    | 0.20085    | 0.8532     | 0.3880     | 484      | 4.065e-5 |
+| 25    | 0.20069    | 0.8547     | 0.3870     | 484      | 2.865e-5 |
+| 26    | 0.20056    | 0.8514     | 0.3869     | 483      | 1.855e-5 |
+| 27    | 0.20044    | 0.8488     | 0.3959     | 483      | 1.053e-5 |
+| 28    | 0.20038    | 0.8488     | 0.3965     | 483      | 4.713e-6 |
+| 29    | 0.20032    | 0.8447     | 0.3951     | 483      | 1.183e-6 |
+| 30    | 0.20031    | 0.8442     | 0.3939     | 483      | 0.000e+0 |
 
-Delta vs CNN baseline (0.9570 / 0.5331, same 85/15 split): −0.051 AUC, −0.127 F1.  
-This gap isolates the value of CNN inductive bias (local time-frequency features) over raw patch projection.
+Best checkpoint: epoch 12 — **val_AUC 0.8922, val_F1 0.3363**
 
-### Final results (70/15/15 split — pending rerun)
-
-| Epoch | train_loss | val_AUC | val_F1 | time (s) | LR |
-|-------|-----------|---------|--------|----------|----|
-|       |           |         |        |          |    |
+The model learns slowly during warmup (epochs 1–5, LR ramping to 3e-4) then improves steadily until epoch 12. AUC degrades noticeably after that — clear overfitting from epoch 16 onward as the LR cosine decays. The loss curve barely moves throughout (0.222 → 0.200), showing the model is stuck near a local optimum characteristic of training ViT from scratch without CNN inductive bias.
 
 ---
 
@@ -64,12 +82,12 @@ HP grid: `configs/hp_vit_baseline.yaml` — covers `drop_path_rate`, `drop_rate`
 
 ## Comparison vs CNN baseline
 
-| Model | val_AUC | val_F1 | Params | Split | Notes |
-|---|---|---|---|---|---|
-| `cnn_baseline` (ResNet-18) | 0.9570 | 0.5331 | ~11M | 85/15 | needs rerun on 70/15/15 |
-| `vit_baseline` (ViT-Small) | 0.9059 | 0.4060 | ~22M | 85/15 | needs rerun on 70/15/15 |
+| Model | val_AUC | val_F1 | Params | Split |
+|---|---|---|---|---|
+| `cnn_baseline` (ResNet-18) | 0.9540 | 0.4844 | ~11M | 70/15/15 |
+| `vit_baseline` (ViT-Small) | 0.8922 | 0.3363 | ~22M | 70/15/15 |
 
-Delta isolates the value of CNN inductive bias (local time-frequency features) over raw patch projection.
+Delta: −0.062 AUC, −0.148 F1. This isolates the value of CNN inductive bias — local time-frequency pattern detection (harmonics, chirp onsets) that raw 16×16 patch projections cannot capture without a convolutional front-end.
 
 ## Next comparison models
 
