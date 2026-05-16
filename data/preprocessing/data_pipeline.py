@@ -6,10 +6,11 @@ import numpy as np
 import pandas as pd
 import librosa
 import torch
+import torchaudio.transforms as T
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MultiLabelBinarizer
-import torchaudio.transforms as T
+from tqdm import tqdm
 
 
 # ─────────────────────────────────────────────
@@ -500,7 +501,7 @@ def build_dataloaders(
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
-    DATA_DIR        = "/path/to/birdclef-2026"
+    DATA_DIR        = "../raw data"
     METADATA_CSV    = f"{DATA_DIR}/train.csv"
     AUDIO_DIR       = f"{DATA_DIR}/train_audio"
     SOUNDSCAPES_DIR = f"{DATA_DIR}/train_soundscapes"
