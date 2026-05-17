@@ -185,7 +185,7 @@ Best checkpoint: epoch 14 — **val_AUC 0.9068, val_F1 0.3410**
 
 | Model | val_AUC | val_F1 | test_AUC | test_F1 | Params | Notes |
 |---|---|---|---|---|---|---|
-| `rf_baseline` (MFCC + RF) | — | — | — | — | — | run failed; pending rerun |
+| `rf_baseline` (MFCC + RF) | 0.7690 | 0.1696 | 0.4897 | — | — |  |
 | `cnn_baseline` (ResNet-18) | 0.9540 | 0.4844 | — | — | ~11M | test eval pending |
 | `vit_baseline` (ViT-Small, scratch) | 0.8922 | 0.3363 | — | — | ~22M | test eval pending |
 | `cnn_transformer` (this, wrong HP) | 0.9068 | 0.3410 | — | — | ~18M | used num_cnn_blocks=3 not 4 |

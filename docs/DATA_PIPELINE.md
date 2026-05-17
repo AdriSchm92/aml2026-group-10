@@ -144,8 +144,8 @@ labels  # torch.Tensor — shape (batch_size, K), dtype float32, values in {0, 1
 ## Sanity Check
 
 ```bash
-python data/preprocessing/data_pipeline.py
+python data/preprocessing/preprocessing_check.ipynb
 ```
 
 Plots three spectrograms: training sample (SpecAugment masks expected), validation
-sample (no masks), and a multi-label soundscape sample (label sum > 1).
+sample (no masks), and a multi-label soundscape sample.

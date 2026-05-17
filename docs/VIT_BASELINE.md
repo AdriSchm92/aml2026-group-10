@@ -27,8 +27,8 @@ Scheduler: 5-epoch linear warmup → cosine decay. SpecAugment.
 | 9     | 0.20822    | 0.8760     | 0.2505     | 481      | 2.814e-4 |
 | 10    | 0.20741    | 0.8797     | 0.2843     | 481      | 2.714e-4 |
 | 11    | 0.20659    | 0.8855     | 0.3084     | 482      | 2.593e-4 |
-| **12**| **0.20580**| **0.8922** | **0.3363** | 483      | 2.456e-4 |
-| 13    | 0.20506    | 0.8922     | 0.3479     | 483      | 2.304e-4 |
+| 12    | 0.20580    | 0.8922     | 0.3363     | 483      | 2.456e-4 |
+| **13**| **0.20506**| **0.8922** | **0.3479** | 483      | 2.304e-4 |
 | 14    | 0.20444    | 0.8904     | 0.3592     | 483      | 2.139e-4 |
 | 15    | 0.20385    | 0.8894     | 0.3624     | 483      | 1.964e-4 |
 | 16    | 0.20333    | 0.8780     | 0.3726     | 483      | 1.781e-4 |
@@ -47,9 +47,9 @@ Scheduler: 5-epoch linear warmup → cosine decay. SpecAugment.
 | 29    | 0.20032    | 0.8447     | 0.3951     | 483      | 1.183e-6 |
 | 30    | 0.20031    | 0.8442     | 0.3939     | 483      | 0.000e+0 |
 
-Best checkpoint: epoch 12 — **val_AUC 0.8922, val_F1 0.3363**
+Best checkpoint: epoch 13 — **val_AUC 0.8922, val_F1 0.3479**
 
-The model learns slowly during warmup (epochs 1–5, LR ramping to 3e-4) then improves steadily until epoch 12. AUC degrades noticeably after that — clear overfitting from epoch 16 onward as the LR cosine decays. The loss curve barely moves throughout (0.222 → 0.200), showing the model is stuck near a local optimum characteristic of training ViT from scratch without CNN inductive bias.
+The model learns slowly during warmup (epochs 1–5, LR ramping to 3e-4) then improves steadily until epoch 13. AUC degrades noticeably after that — clear overfitting from epoch 16 onward as the LR cosine decays. The loss curve barely moves throughout (0.222 → 0.200), showing the model is stuck near a local optimum characteristic of training ViT from scratch without CNN inductive bias.
 
 ---
 
