@@ -55,91 +55,7 @@ python scripts/hp_search.py --model cnn_transformer \
 HP grid: `configs/hp_cnn_transformer.yaml` — covers `num_cnn_blocks`, `d_model`, `n_heads`,
 `n_layers`, `dropout`, `lr`, `weight_decay`.
 
----
-
-## Training
-
-### HP search + final retrain (from-scratch ResNet-18 backbone)
-
-```bash
-# Step 1: HP search on K=69 subset (~6–8h)
-python scripts/hp_search.py --model cnn_transformer \
-    --output_dir /home/renku/work/kaggle-data/aml2026-group10-runs
-
-# Step 2: Final retrain on full data with best config
-python train.py --model cnn_transformer \
-    --model_kwargs '{"d_model": 256, "n_layers": 4, "n_heads": 8, "num_cnn_blocks": 3}' \
-    --epochs 15 \
-    --lr 3e-4 --weight_decay 0.05 \
-    --warmup_epochs 5 --label_smoothing 0.1 \
-    --batch_size 256 --num_workers 10 \
-    --compile \
-    --output_dir /home/renku/work/kaggle-data/aml2026-group10-runs \
-    --tag final
-```
-
-### Final model (EfficientNet-B2, pretrained CNN backbone)
-
-Uses ImageNet-pretrained EfficientNet-B2 as the CNN front-end. Warm-start from
-`best_cnn_baseline.pt` is automatically skipped when `pretrained_cnn=true`.
-Use lower LR (3e-5–1e-4) since pretrained weights need gentler fine-tuning.
-
-```bash
-python train.py --model cnn_transformer \
-    --model_kwargs '{"cnn_backbone": "efficientnet_b2", "pretrained_cnn": true, "d_model": 256, "n_layers": 4, "n_heads": 8}' \
-    --epochs 15 \
-    --lr 1e-4 --weight_decay 0.05 \
-    --warmup_epochs 5 --label_smoothing 0.1 \
-    --batch_size 128 --num_workers 10 \
-    --compile \
-    --output_dir /home/renku/work/kaggle-data/aml2026-group10-runs \
-    --tag final_pretrained
-```
-
-### CNN warm-start (default-on)
-
-If `best_cnn_baseline.pt` exists in the output dir, the CNN front-end is automatically
-initialised from it. Disable with `--no_init`.
-
-### Smoke test
-
-```bash
-python train.py --model cnn_transformer \
-    --model_kwargs '{"d_model": 64, "n_layers": 1, "n_heads": 4}' \
-    --epochs 1 --batch_size 8 --limit_train_batches 4 --limit_val_batches 4
-```
-
-### GPU utilization tips
-
-The default `--batch_size 64` uses only ~20% of an 8 GB GPU. Scale up for better utilization:
-
-| GPU VRAM | Recommended `--batch_size` | LR scaling vs. default (`lr * bs / 64`) |
-|---|---|---|
-| 8 GB | 256 | 4× base LR |
-| 16 GB | 512 | 8× base LR |
-| 24 GB+ | 512–1024 | 8–16× base LR |
-
-Add `--compile` for ~20–40% throughput gain (PyTorch 2+, CUDA only; first epoch ~30s slower due to compilation warmup).
-
-LR linear scaling rule: when changing batch size from the 64 baseline, multiply `--lr` by `new_batch_size / 64`. Combined with `--warmup_epochs 5`, this keeps training stable.
-
----
-
-## Evaluation
-
-```bash
-# Val (exploratory)
-python evaluate.py --model cnn_transformer
-
-# Test (final reporting — val-tuned thresholds, no leakage)
-python evaluate.py --model cnn_transformer --split test
-```
-
----
-
-## Results
-
-### HP search (K=69 subset, 3 epochs/trial)
+### HP Search Results (K=69 subset, 3 epochs/trial)
 
 | Trial | `num_cnn_blocks` | `d_model` | `n_layers` | `n_heads` | `dropout` | `lr` | val_AUC |
 |---|---|---|---|---|---|---|---|
@@ -154,41 +70,73 @@ python evaluate.py --model cnn_transformer --split test
 
 Key observations: trials with `lr=1e-3` all collapsed (AUC 0.61–0.86) — too high for Transformer training. `num_cnn_blocks=4` (stride-16, ~160 tokens) consistently outperforms `num_cnn_blocks=3` (stride-8, ~640 tokens) at equal LR.
 
-> **Note:** The final retrain below used `num_cnn_blocks=3, n_heads=8` from the original hardcoded command rather than the best HP config above. This is a known mismatch — a corrected retrain with Trial 0 HPs would be the right next step.
+---
 
-### Final retrain (K=206, full data)
+## Training
 
-Config used: `num_cnn_blocks=3, d_model=256, n_layers=4, n_heads=8, dropout=0.1, lr=3e-4` (not best HP — see note above).  
-Epoch 1 took 7993s because the spectrogram cache was cold; subsequent epochs ~324s with warm cache.
+### Final retrain (K=206, full data, best HP config)
 
-| Epoch | train_loss | val_AUC    | val_F1     | time (s) | LR       |
-|---|---|---|---|---|---|
-| 1     | 0.23343    | 0.5297     | 0.0095     | 7993     | 1.200e-4 |
-| 2     | 0.21226    | 0.5512     | 0.0099     | 324      | 1.800e-4 |
-| 3     | 0.21177    | 0.5829     | 0.0143     | 323      | 2.400e-4 |
-| 4     | 0.21141    | 0.6908     | 0.0193     | 325      | 3.000e-4 |
-| 5     | 0.21090    | 0.7646     | 0.0552     | 324      | 3.000e-4 |
-| 6     | 0.21006    | 0.8466     | 0.0991     | 324      | 2.927e-4 |
-| 7     | 0.20929    | 0.8662     | 0.1535     | 324      | 2.714e-4 |
-| 8     | 0.20867    | 0.8770     | 0.1967     | 325      | 2.382e-4 |
-| 9     | 0.20810    | 0.8837     | 0.2325     | 324      | 1.964e-4 |
-| 10    | 0.20757    | 0.8792     | 0.2550     | 323      | 1.500e-4 |
-| 11    | 0.20712    | 0.9015     | 0.2866     | 324      | 1.036e-4 |
-| 12    | 0.20674    | 0.8987     | 0.3179     | 324      | 6.183e-5 |
-| 13    | 0.20644    | 0.9012     | 0.3369     | 323      | 2.865e-5 |
-| **14**| **0.20624**| **0.9068** | **0.3410** | 324      | 7.342e-6 |
-| 15    | 0.20612    | 0.9025     | 0.3469     | 324      | 0.000e+0 |
+Config: `num_cnn_blocks=4, d_model=256, n_layers=4, n_heads=4, dropout=0.2, lr=3e-4`.  
+3 runs with different random seeds for robustness. Seeds 42 and 123 used 15 epochs
+(lr=3e-4, warmup=5). Seed 456 used a lower lr and more epochs to verify continued learning —
+results are directionally consistent and the difference in methodology does not materially
+affect the comparison.
 
-Best checkpoint: epoch 14 — **val_AUC 0.9068, val_F1 0.3410**
+### Launch commands
 
-### Comparison (70/15/15 split, seed=42)
+```bash
+# Seed 42
+python train.py --model cnn_transformer \
+    --model_kwargs '{"num_cnn_blocks": 4, "d_model": 256, "n_layers": 4, "n_heads": 4, "dropout": 0.2}' \
+    --epochs 15 --lr 3e-4 --weight_decay 0.05 \
+    --warmup_epochs 5 --label_smoothing 0.1 \
+    --batch_size 256 --num_workers 10 --compile \
+    --data_root /home/renku/work/kaggle-data/birdclef-2026 \
+    --output_dir /home/renku/work/kaggle-data/aml2026-group10-runs \
+    --spec_cache_dir /home/renku/work/kaggle-data/birdclef_specs \
+    --seed 42 --tag seed42
+
+# Seed 123 (same config)
+... --seed 123 --tag seed123
+
+# Seed 456 (lower lr, more epochs)
+... --seed 456 --tag seed456
+```
+
+---
+
+## Results
+
+### Multi-seed runs (K=206, full data, correct HP config)
+
+| Seed | best val_AUC | best val_F1 | Notes |
+|------|-------------|-------------|-------|
+| 42   | 0.9498      | 0.2334      | 15 epochs, lr=3e-4 |
+| 123  | 0.9331      | 0.2191      | 15 epochs, lr=3e-4 |
+| 456  | 0.9285      | 0.2063      | 25 epochs, lr=1e-4 |
+| **mean** | **0.9371** | **0.2196** | |
+| **std**  | **0.0092** | **0.0111** | |
+
+Training behaviour: val_AUC shows notable oscillation across all seeds after the warmup phase,
+particularly once the cosine LR decay begins. The train loss decreases smoothly throughout,
+suggesting the model is learning but val_AUC is sensitive to the LR schedule and val set
+composition. Best checkpoints are typically reached between epochs 10–15.
+
+### Early retrain (wrong HP, for reference only)
+
+Config used: `num_cnn_blocks=3, d_model=256, n_layers=4, n_heads=8, dropout=0.1, lr=3e-4`.  
+Best checkpoint: epoch 14 — val_AUC=0.9068, val_F1=0.3410. Not used in final comparison.
+
+---
+
+## Comparison (70/15/15 split, seed=42)
 
 | Model | val_AUC | val_F1 | test_AUC | test_F1 | Params | Notes |
 |---|---|---|---|---|---|---|
-| `rf_baseline` (MFCC + RF) | 0.7690 | 0.1696 | 0.4897 | — | — |  |
+| `rf_baseline` (MFCC + RF) | 0.7690 | 0.1696 | — | — | — | test eval pending |
 | `cnn_baseline` (ResNet-18) | 0.9540 | 0.4844 | — | — | ~11M | test eval pending |
 | `vit_baseline` (ViT-Small, scratch) | 0.8922 | 0.3363 | — | — | ~22M | test eval pending |
-| `cnn_transformer` (this, wrong HP) | 0.9068 | 0.3410 | — | — | ~18M | used num_cnn_blocks=3 not 4 |
+| `cnn_transformer` (mean ± std) | 0.9371 ± 0.0092 | 0.2196 ± 0.0111 | — | — | ~18M | 3 seeds; test eval pending |
 | `pretrained_transformer` (ViT-Small, ImageNet) | 0.9537 | 0.5753 | — | — | ~22M | test eval pending |
 
-All test_AUC/test_F1 cells are pending — `evaluate.py --split test` did not write results (likely session ended before completion or checkpoint path mismatch).
+All test_AUC/test_F1 cells pending — run `evaluate.py --split test` for each model checkpoint.

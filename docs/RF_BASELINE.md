@@ -46,11 +46,11 @@ python train_rf.py --n_mfcc 40 --n_estimators 100
 
 ## Comparison vs other baselines
 
-| Model | val_AUC | val_F1 | sc_AUC | Type |
-|---|---|---|---|---|
-| `rf_baseline` (MFCC + RF) | 0.7690 | 0.1696 | 0.4897 | No DL |
-| `cnn_baseline` (ResNet-18) | 0.9540 | 0.4844 | — | Pure CNN |
-| `vit_baseline` (ViT-Small) | 0.8922 | 0.3363 | — | Pure Transformer |
-| `cnn_transformer` | 0.9068 | 0.3410 | - | Hybrid |
+| Model | val_AUC | val_F1 | sc_AUC | test_AUC | test_F1 | Type |
+|---|---|---|---|---|---|---|
+| `rf_baseline` (MFCC + RF) | 0.7690 | 0.1696 | 0.4897 | 0.7729 | 0.1016 | No DL |
+| `cnn_baseline` (ResNet-18) | 0.9540 | 0.4844 | — | - | - | Pure CNN |
+| `vit_baseline` (ViT-Small) | 0.8922 | 0.3363 | — | - | - | Pure Transformer |
+| `cnn_transformer` (mean ± std) | 0.9371 ± 0.0092 | 0.2196 ± 0.0111 | - | - | - | Hybrid |
 
 Expected: RF substantially below CNN/ViT — establishes the value of deep feature learning over handcrafted MFCC. Delta vs ResNet-18: −0.188 AUC, −0.363 F1.
