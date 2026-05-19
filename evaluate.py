@@ -36,7 +36,7 @@ if str(REPO_ROOT) not in sys.path:
 from data.preprocessing.data_pipeline import build_dataloaders  # noqa: E402
 from models.registry import load_model  # noqa: E402
 from train import resolve_data_root, resolve_output_dir  # noqa: E402
-from utils.inference import predict_val_probs  # noqa: E402
+from utils.inference import predict_clip_probs  # noqa: E402
 from utils.metrics import macro_f1_tuned, macro_roc_auc  # noqa: E402
 
 
@@ -82,6 +82,12 @@ def parse_args() -> argparse.Namespace:
                    help="Must match the value used during training for identical splits.")
     p.add_argument("--save_per_class", default=None,
                    help="Optional path to write per-class AUC JSON.")
+    p.add_argument(
+        "--spec_cache_dir",
+        default=os.environ.get("BIRDCLEF_SPEC_CACHE"),
+        help="Directory with precomputed spectrogram .npy files "
+             "(default: $BIRDCLEF_SPEC_CACHE env var).",
+    )
     return p.parse_args()
 
 
@@ -115,6 +121,7 @@ def main() -> None:
         num_workers=args.num_workers,
         random_state=args.seed,
         duration_cache_path=(os.environ.get("BIRDCLEF_DURATION_CACHE") or None),
+        spec_cache_dir=args.spec_cache_dir,
     )
 
     if len(mlb.classes_) != num_classes:
@@ -131,7 +138,7 @@ def main() -> None:
 
     if args.split == "val":
         # ── Val evaluation: threshold tuning on the same set (exploratory) ───
-        y_true, y_score = predict_val_probs(model, val_loader, device)
+        y_true, y_score = predict_clip_probs(model, val_loader, device)
         auc, per_class = macro_roc_auc(y_true, y_score)
         f1, tuned_thr = macro_f1_tuned(y_true, y_score)
         threshold_source = "tuned_on_val"
@@ -146,7 +153,7 @@ def main() -> None:
             )
         tuned_thr = np.array(ckpt["thresholds"])
         threshold_source = f"val_epoch_{ckpt.get('epoch', '?')}"
-        y_true, y_score = predict_val_probs(model, test_loader, device)
+        y_true, y_score = predict_clip_probs(model, test_loader, device)
         auc, per_class = macro_roc_auc(y_true, y_score)
         # Apply the val-tuned thresholds to compute test F1.
         f1, _ = macro_f1_tuned(y_true, y_score, thresholds=tuned_thr)

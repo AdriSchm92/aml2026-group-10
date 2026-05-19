@@ -66,6 +66,38 @@ def predict_val_probs(
 
 
 @torch.no_grad()
+def predict_clip_probs(
+    model: torch.nn.Module,
+    loader,
+    device: torch.device,
+):
+    """Chunk-level predictions max-pooled to clip (recording) level.
+
+    Groups 5s chunks by source file and takes elementwise max across chunks,
+    matching PROBLEMSETTING.md §Input Representation clip-level aggregation.
+
+    Returns:
+        y_true_clip  : (N_files, K) — per-file labels (union over chunks)
+        y_score_clip : (N_files, K) — per-file scores (max over chunks)
+    """
+    from collections import defaultdict
+
+    y_true, y_score = predict_val_probs(model, loader, device)
+    samples = loader.dataset.samples
+
+    file_to_idxs: dict[str, list[int]] = defaultdict(list)
+    for i, s in enumerate(samples):
+        file_to_idxs[s["file_path"]].append(i)
+
+    y_true_clip, y_score_clip = [], []
+    for fp in sorted(file_to_idxs):
+        idxs = file_to_idxs[fp]
+        y_true_clip.append(y_true[idxs].max(axis=0))
+        y_score_clip.append(y_score[idxs].max(axis=0))
+    return np.array(y_true_clip), np.array(y_score_clip)
+
+
+@torch.no_grad()
 def predict_file(
     model: torch.nn.Module,
     file_path: str,
