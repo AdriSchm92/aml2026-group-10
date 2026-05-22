@@ -154,41 +154,44 @@ python evaluate.py --model cnn_transformer --split test
 
 Key observations: trials with `lr=1e-3` all collapsed (AUC 0.61–0.86) — too high for Transformer training. `num_cnn_blocks=4` (stride-16, ~160 tokens) consistently outperforms `num_cnn_blocks=3` (stride-8, ~640 tokens) at equal LR.
 
-> **Note:** The final retrain below used `num_cnn_blocks=3, n_heads=8` from the original hardcoded command rather than the best HP config above. This is a known mismatch — a corrected retrain with Trial 0 HPs would be the right next step.
+### Final retrain (K=206, full data, correct HPs)
 
-### Final retrain (K=206, full data)
-
-Config used: `num_cnn_blocks=3, d_model=256, n_layers=4, n_heads=8, dropout=0.1, lr=3e-4` (not best HP — see note above).  
-Epoch 1 took 7993s because the spectrogram cache was cold; subsequent epochs ~324s with warm cache.
+Config: `num_cnn_blocks=4, d_model=256, n_layers=4, n_heads=4, dropout=0.2, lr=6e-4` (Trial 0 best HP; LR linearly scaled from 3e-4@batch64 → 6e-4@batch128).  
+20 epochs, 5-epoch warmup → cosine decay, label_smoothing=0.1, batch=128, spectrogram cache warm (~329s/epoch).
 
 | Epoch | train_loss | val_AUC    | val_F1     | time (s) | LR       |
 |---|---|---|---|---|---|
-| 1     | 0.23343    | 0.5297     | 0.0095     | 7993     | 1.200e-4 |
-| 2     | 0.21226    | 0.5512     | 0.0099     | 324      | 1.800e-4 |
-| 3     | 0.21177    | 0.5829     | 0.0143     | 323      | 2.400e-4 |
-| 4     | 0.21141    | 0.6908     | 0.0193     | 325      | 3.000e-4 |
-| 5     | 0.21090    | 0.7646     | 0.0552     | 324      | 3.000e-4 |
-| 6     | 0.21006    | 0.8466     | 0.0991     | 324      | 2.927e-4 |
-| 7     | 0.20929    | 0.8662     | 0.1535     | 324      | 2.714e-4 |
-| 8     | 0.20867    | 0.8770     | 0.1967     | 325      | 2.382e-4 |
-| 9     | 0.20810    | 0.8837     | 0.2325     | 324      | 1.964e-4 |
-| 10    | 0.20757    | 0.8792     | 0.2550     | 323      | 1.500e-4 |
-| 11    | 0.20712    | 0.9015     | 0.2866     | 324      | 1.036e-4 |
-| 12    | 0.20674    | 0.8987     | 0.3179     | 324      | 6.183e-5 |
-| 13    | 0.20644    | 0.9012     | 0.3369     | 323      | 2.865e-5 |
-| **14**| **0.20624**| **0.9068** | **0.3410** | 324      | 7.342e-6 |
-| 15    | 0.20612    | 0.9025     | 0.3469     | 324      | 0.000e+0 |
+| 1     | 0.22399    | 0.5462     | 0.0088     | 371      | 2.400e-4 |
+| 2     | 0.21193    | 0.5566     | 0.0135     | 328      | 3.600e-4 |
+| 3     | 0.21153    | 0.5899     | 0.0146     | 328      | 4.800e-4 |
+| 4     | 0.21124    | 0.6570     | 0.0166     | 328      | 6.000e-4 |
+| 5     | 0.21049    | 0.7949     | 0.0709     | 329      | 6.000e-4 |
+| 6     | 0.20949    | 0.8332     | 0.1168     | 329      | 5.934e-4 |
+| 7     | 0.20861    | 0.8505     | 0.1944     | 330      | 5.741e-4 |
+| 8     | 0.20780    | 0.8829     | 0.2707     | 329      | 5.427e-4 |
+| 9     | 0.20710    | 0.8939     | 0.3062     | 330      | 5.007e-4 |
+| 10    | 0.20648    | 0.8947     | 0.3427     | 329      | 4.500e-4 |
+| 11    | 0.20596    | 0.8953     | 0.3257     | 329      | 3.927e-4 |
+| 12    | 0.20552    | 0.8909     | 0.3787     | 329      | 3.314e-4 |
+| 13    | 0.20513    | 0.9105     | 0.3910     | 330      | 2.686e-4 |
+| 14    | 0.20479    | 0.8828     | 0.3689     | 330      | 2.073e-4 |
+| 15    | 0.20447    | 0.9157     | 0.4288     | 330      | 1.500e-4 |
+| 16    | 0.20418    | 0.9126     | 0.4361     | 330      | 9.926e-5 |
+| 17    | 0.20396    | 0.9194     | 0.4368     | 330      | 5.729e-5 |
+| 18    | 0.20377    | 0.9194     | 0.4387     | 329      | 2.594e-5 |
+| 19    | 0.20364    | 0.9169     | 0.4403     | 330      | 6.556e-6 |
+| **20**| **0.20359**| **0.9206** | **0.4417** | 329      | 0.000e+0 |
 
-Best checkpoint: epoch 14 — **val_AUC 0.9068, val_F1 0.3410**
+Best checkpoint: epoch 20 — **val_AUC 0.9206, val_F1 0.4417**
 
 ### Comparison (70/15/15 split, seed=42)
 
 | Model | val_AUC | val_F1 | test_AUC | test_F1 | Params | Notes |
 |---|---|---|---|---|---|---|
-| `rf_baseline` (MFCC + RF) | — | — | — | — | — | run failed; pending rerun |
+| `rf_baseline` (MFCC + RF) | 0.7653 | 0.1433 | — | — | — | 8/12 HP combos; no DL |
 | `cnn_baseline` (ResNet-18) | 0.9540 | 0.4844 | — | — | ~11M | test eval pending |
 | `vit_baseline` (ViT-Small, scratch) | 0.8922 | 0.3363 | — | — | ~22M | test eval pending |
-| `cnn_transformer` (this, wrong HP) | 0.9068 | 0.3410 | — | — | ~18M | used num_cnn_blocks=3 not 4 |
+| `cnn_transformer` (this) | 0.9206 | 0.4417 | — | — | ~18M | correct HP: num_cnn_blocks=4, n_heads=4 |
 | `pretrained_transformer` (ViT-Small, ImageNet) | 0.9537 | 0.5753 | — | — | ~22M | test eval pending |
 
-All test_AUC/test_F1 cells are pending — `evaluate.py --split test` did not write results (likely session ended before completion or checkpoint path mismatch).
+All test_AUC/test_F1 cells pending — test evaluation not yet run.
