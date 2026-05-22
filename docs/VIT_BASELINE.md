@@ -71,12 +71,21 @@ python train.py --model vit_baseline \
 
 ## HP search
 
+HP grid: `configs/hp_vit_baseline.yaml` — covers `drop_path_rate`, `drop_rate`, `lr`, `weight_decay`.  
+6 trials × 5 epochs on K=69 subset (`min_recordings ≥ 200`) — budget ~4–6h.
+
 ```bash
 python scripts/hp_search.py --model vit_baseline --n_trials 6 \
-    --output_dir /home/renku/work/kaggle-data/aml2026-group10-runs
+    --data_root $DATA_ROOT --spec_cache_dir $BIRDCLEF_SPEC_CACHE
 ```
 
-HP grid: `configs/hp_vit_baseline.yaml` — covers `drop_path_rate`, `drop_rate`, `lr`, `weight_decay`.
+### HP search results (K=69 subset, 5 epochs/trial)
+
+| Trial | `drop_path_rate` | `drop_rate` | `lr` | `weight_decay` | val_AUC |
+|---|---|---|---|---|---|
+| | | | | | |
+
+_Results pending._
 
 ---
 
