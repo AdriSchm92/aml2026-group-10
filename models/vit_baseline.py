@@ -31,7 +31,7 @@ class ViTBaseline(nn.Module):
         self.vit = timm.create_model(
             "vit_small_patch16_224",
             in_chans=1,
-            img_size=(128, 320),
+            img_size=(128, 320), # 10s: (128,640)
             num_classes=num_classes,
             pretrained=False,
             drop_path_rate=drop_path_rate,
@@ -39,7 +39,7 @@ class ViTBaseline(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.pad(x, (0, 7))  # (B,1,128,313) → (B,1,128,320)
+        x = F.pad(x, (0, 7))  # (0,7): (B,1,128,313) → (B,1,128,320) # (0,14): (B,1,128,626) → (B,1,128,640)
         return self.vit(x)
 
 

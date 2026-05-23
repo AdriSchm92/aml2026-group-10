@@ -76,7 +76,7 @@ class CNNTransformer(nn.Module):
         # Determine C, H', W' via a dummy forward — works for any backbone
         # without backbone-specific channel tables.
         with torch.no_grad():
-            dummy = torch.zeros(1, 1, 128, 313)
+            dummy = torch.zeros(1, 1, 128, 313) #626 when using 10-seconds clips
             feat = self.cnn(dummy)[0]
         _, cnn_channels, H, W = feat.shape
 
