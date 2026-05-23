@@ -17,7 +17,7 @@ import torchaudio.transforms as T
 # Confirmed from EDA: 32000 Hz, 5s → (128, 313), 10s → (128,626)
 # ─────────────────────────────────────────────
 SAMPLE_RATE   = 32000
-CLIP_DURATION = 5 #10        # seconds
+CLIP_DURATION = 5 #10
 N_MELS        = 128
 HOP_LENGTH    = 512
 N_FFT         = 1024

@@ -51,18 +51,26 @@ Motivated by the hypothesis that the Transformer's underperformance on 5s clips 
 | `cnn_baseline` | 15 | 7.5e-5 | 1e-4 | 5 | 0.1 | 64 |
 | `cnn_transformer` | 15 | 7.5e-5 | 0.05 | 5 | 0.1 | 64 |
 | `pretrained_transformer` | 15 | 7.5e-5 | 0.05 | 5 | 0.1 | 64 |
+| `vit_baseline` | 15 | 7.5e-5 | 0.05 | 5 | 0.1 | 64 |
+
 
 ### Results
 
-| Model | 5s val_AUC | 10s val_AUC | Delta |
+| Model | 5s val_AUC (seed 42)| 10s val_AUC | Delta |
 |---|---|---|---|
 | `cnn_baseline` (ResNet-18) | 0.9540 | 0.8671 | −0.087 |
 | `cnn_transformer` (ResNet-18 + Transformer) | 0.9498 | 0.9335 | −0.016 |
 | `pretrained_transformer` (ViT-Small, ImageNet) | 0.9537 | 0.9489 | −0.005 |
+| `vit_baseline` (Standard Vision Transformer) | 0.8922 | 0.9079 | +0.157 |
+
 
 ### Key observations
 
-The results do not support the hypothesis that longer clips would help the Transformer. The CNN-Transformer shows no meaningful improvement with longer clips (0.9335 vs 0.9498 at 5s), suggesting the bottleneck is not temporal context but rather the difficulty of training the Transformer component from scratch. The pretrained Transformer remains remarkably stable across both clip durations (0.9489 vs 0.9537), confirming that its strong performance is driven by ImageNet pretraining rather than temporal context length. Most strikingly, the CNN baseline drops sharply (0.8671 vs 0.9540) — a pure CNN gains nothing from longer sequences and suffers from the smaller batch size required by the increased memory footprint. Taken together, these results suggest that the 5-second clip duration is not the limiting factor for the Transformer's contribution, and that pretraining is a far more important variable than clip length in this setting.
+The results partially support the hypothesis that longer clips benefit Transformer-based models, but the picture is nuanced. The ViT baseline is the only model that improves with longer clips (+0.016 AUC), which is the most interpretable finding: without CNN inductive bias, the from-scratch ViT relies more heavily on global context, and longer clips provide more tokens for self-attention to work with. This confirms that pure Transformers do benefit from longer temporal context, at least when trained from scratch without strong local feature extractors.
+
+However, the CNN-Transformer shows no meaningful improvement (0.9335 vs 0.9498 at 5s), suggesting that once a CNN front-end handles local feature extraction, the Transformer component gains little from additional temporal context. The pretrained Transformer remains remarkably stable across both clip durations (0.9489 vs 0.9537), confirming that its strong performance is driven by ImageNet pretraining rather than temporal context length. Most strikingly, the CNN baseline drops sharply (0.8671 vs 0.9540) — a pure CNN gains nothing from longer sequences and is hurt by the smaller batch size required by the increased memory footprint.
+
+Taken together, these results suggest that clip duration is a meaningful variable specifically for pure Transformer architectures, while CNN-based models are largely insensitive to it. Pretraining remains the single most impactful factor across all conditions.
 
 ---
 
