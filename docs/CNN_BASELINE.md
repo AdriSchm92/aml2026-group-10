@@ -21,6 +21,31 @@ Best checkpoint: epoch 5 — **val_AUC 0.9540, val_F1 0.4844**
 
 AUC still slowly improving at epoch 5 (cosine LR just reached zero). Additional epochs with a longer schedule would likely push further. The ~255s/epoch reflects cached spectrograms; raw-decode runs take ~9200s/epoch.
 
+## HP Search
+
+HP grid: `configs/hp_cnn_baseline.yaml` — covers `resnet_variant` (ResNet-18 vs ResNet-34), `lr`, `weight_decay`.  
+6 trials × 3 epochs on K=69 subset (`min_recordings ≥ 200`).
+
+```bash
+python scripts/hp_search.py --model cnn_baseline --n_trials 6 \
+    --data_root $DATA_ROOT --spec_cache_dir $BIRDCLEF_SPEC_CACHE
+```
+
+### HP search results (K=69 subset, 3 epochs/trial)
+
+| Trial | `resnet_variant` | `lr` | `weight_decay` | val_AUC |
+|---|---|---|---|---|
+| 0 | resnet34 | 1e-3 | 1e-5 | 0.9578 |
+| **1** | **resnet34** | **3e-3** | **1e-4** | **0.9640** |
+| 2 | resnet34 | 1e-3 | 1e-4 | 0.9593 |
+| 3 | resnet34 | 3e-3 | 1e-5 | 0.9579 |
+| 4 | resnet18 | 1e-3 | 1e-5 | 0.9539 |
+| 5 | resnet18 | 3e-3 | 1e-4 | 0.9531 |
+
+**Best config:** Trial 1 — `resnet34, lr=3e-3, weight_decay=1e-4` → val_AUC 0.9640
+
+Key observations: ResNet-34 consistently outperforms ResNet-18 across all LR/wd combinations (~+0.005 AUC). Higher LR (3e-3) works well for CNNs unlike Transformers where it causes collapse. Deeper backbone captures richer mel-spectrogram features at similar training cost (~975s vs ~615s per trial).
+
 ## Next comparison models
 
 1. `vit_baseline` — pure ViT on raw patches, no CNN front-end — [docs/VIT_BASELINE.md](VIT_BASELINE.md)

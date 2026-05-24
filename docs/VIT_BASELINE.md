@@ -71,12 +71,28 @@ python train.py --model vit_baseline \
 
 ## HP search
 
+HP grid: `configs/hp_vit_baseline.yaml` — covers `drop_path_rate`, `drop_rate`, `lr`, `weight_decay`.  
+6 trials × 5 epochs on K=69 subset (`min_recordings ≥ 200`).
+
 ```bash
 python scripts/hp_search.py --model vit_baseline --n_trials 6 \
-    --output_dir /home/renku/work/kaggle-data/aml2026-group10-runs
+    --data_root $DATA_ROOT --spec_cache_dir $BIRDCLEF_SPEC_CACHE
 ```
 
-HP grid: `configs/hp_vit_baseline.yaml` — covers `drop_path_rate`, `drop_rate`, `lr`, `weight_decay`.
+### HP search results (K=69 subset, 5 epochs/trial)
+
+| Trial | `drop_path_rate` | `drop_rate` | `lr` | `weight_decay` | val_AUC |
+|---|---|---|---|---|---|
+| **0** | **0.1** | **0.1** | **1e-4** | **0.05** | **0.9090** |
+| 1 | 0.2 | 0.1 | 3e-4 | 0.05 | 0.8765 |
+| 2 | 0.1 | 0.1 | 1e-3 | 0.01 | 0.7058 |
+| 3 | 0.2 | 0.05 | 3e-4 | 0.01 | 0.8977 |
+| 4 | 0.05 | 0.1 | 1e-3 | 0.01 | 0.6512 |
+| 5 | 0.1 | 0.05 | 1e-3 | 0.01 | 0.6618 |
+
+**Best config:** Trial 0 — `drop_path_rate=0.1, drop_rate=0.1, lr=1e-4, weight_decay=0.05` → val_AUC 0.9090
+
+Key observations: `lr=1e-3` collapses training in all three trials (AUC 0.65–0.71), confirming ViT from scratch requires careful LR selection — same pattern as CNN-Transformer. `weight_decay=0.05` (stronger regularisation) consistently outperforms `0.01`. Lower LR (1e-4) with high dropout (0.1+0.1) gives the best result.
 
 ---
 
