@@ -115,6 +115,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--data_root", default=None)
     p.add_argument("--output_dir", default=None,
                    help="Where checkpoints and HP results are written.")
+    p.add_argument("--spec_cache_dir", default=os.environ.get("BIRDCLEF_SPEC_CACHE"),
+                   help="Spectrogram cache dir (default: $BIRDCLEF_SPEC_CACHE).")
     p.add_argument(
         "--verbose_data",
         action="store_true",
@@ -173,6 +175,8 @@ def main() -> None:
         sys.argv += ["--data_root", args.data_root]
     if args.output_dir:
         sys.argv += ["--output_dir", args.output_dir]
+    if args.spec_cache_dir:
+        sys.argv += ["--spec_cache_dir", args.spec_cache_dir]
     if args.verbose_data:
         sys.argv += ["--verbose_data"]
     base_train_ns = train_module.parse_args()

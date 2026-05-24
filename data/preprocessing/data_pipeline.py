@@ -143,8 +143,7 @@ class BirdCLEFDataset(Dataset):
         self._class_set    = set(label_encoder.classes_)
         self._class_to_idx = {c: i for i, c in enumerate(label_encoder.classes_)}
 
-        # SpecAugment: masks random frequency bands and time segments.
-        # Two masks of each type (per SpecAugment paper) for stronger regularisation.
+        # SpecAugment: one frequency mask + one time mask per sample.
         self.freq_mask = T.FrequencyMasking(freq_mask_param=24)
         self.time_mask = T.TimeMasking(time_mask_param=64)
 
@@ -193,8 +192,6 @@ class BirdCLEFDataset(Dataset):
         # ── 6. Apply SpecAugment (training only) ─────────────────────────────
         if self.augment:
             spec = self.freq_mask(spec)
-            spec = self.freq_mask(spec)
-            spec = self.time_mask(spec)
             spec = self.time_mask(spec)
 
         # ── 7. Build multi-hot label vector ──────────────────────────────────

@@ -41,6 +41,6 @@ hp_space:
   n_layers: [2, 4]               # transformer depth
   dropout: [0.1, 0.2]
 
-  # Optimiser
-  lr: [1.0e-4, 3.0e-4, 1.0e-3]
+  # Optimiser — lr=1e-3 removed: every trial that sampled it collapsed (AUC 0.61–0.69)
+  lr: [1.0e-4, 3.0e-4]
   weight_decay: [1.0e-4, 5.0e-2]
