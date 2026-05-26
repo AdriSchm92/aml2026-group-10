@@ -37,20 +37,27 @@ Features cached per `(split, n_mfcc)` under `.cache/birdclef/` — re-extraction
 
 ## Launch command
 ```bash
-# Full HP grid
+# Full HP grid (12 combos)
 python train_rf.py --tune --n_jobs 10 \
     --output_dir /home/renku/work/kaggle-data/aml2026-group10-runs
-# Single run (default HPs)
+
+# Best config (from HP search)
+python train_rf.py --n_mfcc 20 --n_estimators 300 --max_depth 20
+
+# Single run (code defaults — not the best config)
 python train_rf.py --n_mfcc 40 --n_estimators 100
 ```
 
 ## Comparison vs other baselines
 
+All seed-42 val values. Multi-seed means in [RESULTS.md](RESULTS.md).
+
 | Model | val_AUC | val_F1 | sc_AUC | test_AUC | test_F1 | Type |
 |---|---|---|---|---|---|---|
 | `rf_baseline` (MFCC + RF) | 0.7690 | 0.1696 | 0.4897 | 0.7729 | 0.1016 | No DL |
-| `cnn_baseline` (ResNet-18) | 0.9540 | 0.4844 | — | - | - | Pure CNN |
-| `vit_baseline` (ViT-Small) | 0.8922 | 0.3363 | — | - | - | Pure Transformer |
-| `cnn_transformer` (mean ± std) | 0.9371 ± 0.0092 | 0.2196 ± 0.0111 | - | - | - | Hybrid |
+| `cnn_baseline` (ResNet-18) | 0.9540 | 0.4844 | — | — | — | Pure CNN |
+| `vit_baseline` (ViT-Small) | 0.8922 | 0.3479 | — | — | — | Pure Transformer |
+| `cnn_transformer` | 0.9498 | 0.2334 | — | — | — | Hybrid |
+| `pretrained_transformer` | 0.9537 | 0.5753 | — | — | — | Pretrained Transformer |
 
-Expected: RF substantially below CNN/ViT — establishes the value of deep feature learning over handcrafted MFCC. Delta vs ResNet-18: −0.188 AUC, −0.363 F1.
+Expected: RF substantially below all deep learning models — establishes the value of deep feature learning over handcrafted MFCC. Delta vs best model (pretrained_transformer mean 0.9550): −0.186 AUC.

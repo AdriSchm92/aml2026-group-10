@@ -35,7 +35,7 @@ data_subset_min_recordings: 200
 # Each key maps to a list of candidates; hp_search.py samples uniformly.
 hp_space:
   # Architecture
-  num_cnn_blocks: [3, 4]         # stride-8 (~624 tokens) vs stride-16 (~160 tokens)
+  num_cnn_blocks: [3, 4]         # stride-8 (~640 tokens) vs stride-16 (~160 tokens)
   d_model: [128, 256]            # transformer width
   n_heads: [4, 8]                # must divide d_model; 128/4=32, 256/8=32 ✓
   n_layers: [2, 4]               # transformer depth

@@ -143,9 +143,7 @@ labels  # torch.Tensor — shape (batch_size, K), dtype float32, values in {0, 1
 
 ## Sanity Check
 
-```bash
-python data/preprocessing/preprocessing_check.ipynb
-```
-
-Plots three spectrograms: training sample (SpecAugment masks expected), validation
-sample (no masks), and a multi-label soundscape sample.
+Open `data/preprocessing/preprocessing_check.ipynb` in Jupyter and run all cells.
+It plots three spectrograms: training sample (SpecAugment masks expected), validation
+sample (no masks), and a multi-label soundscape sample. Set `$DATA_ROOT` to the
+BirdCLEF 2026 data directory before running, or edit `DATA_ROOT` directly in the notebook.

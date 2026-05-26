@@ -29,6 +29,7 @@ there after each training run so the team can share them without re-running.
 | `DATA_ROOT` | Path to data root (`train.csv`, `train_audio/`, etc.) | auto-detected |
 | `BIRDCLEF_STASH_DIR` | Override local stash path | `./birdclef_stash` |
 | `BIRDCLEF_DURATION_CACHE` | Path to duration cache file | `.cache/birdclef/` |
+| `BIRDCLEF_SPEC_CACHE` | Path to precomputed spectrogram cache dir (see `scripts/precompute_specs.py`) | — |
 | `TRAINING_OUTPUT_DIR` | Where checkpoints and metrics are written | auto-detected |
 | `TRAINING_OUTPUT_SUBDIR` | Subdir name under `kaggle-data/` on Renku | `aml2026-group10-runs` |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot for training notifications | — |
@@ -133,8 +134,8 @@ After HP search, the final retrain uses the best config on full data:
 
 ```bash
 python train.py --model cnn_transformer \
-    --model_kwargs '{"d_model": 256, "n_layers": 4, "n_heads": 8}' \
-    --epochs 15 --warmup_epochs 5 --label_smoothing 0.1 \
+    --model_kwargs '{"num_cnn_blocks": 4, "d_model": 256, "n_layers": 4, "n_heads": 4, "dropout": 0.2}' \
+    --epochs 15 --lr 3e-4 --weight_decay 0.05 --warmup_epochs 5 --label_smoothing 0.1 \
     --output_dir /home/renku/work/kaggle-data/aml2026-group10-runs
 ```
 
@@ -163,8 +164,8 @@ Registry auto-discovers all files in `models/` (skips `registry.py`, `__init__.p
 
 | Name | Description | Status |
 |---|---|---|
-| `cnn_baseline` | ResNet-18 or ResNet-34 on mel-spectrograms | done (85/15) — needs rerun on 70/15/15 — [CNN_BASELINE.md](CNN_BASELINE.md) |
-| `vit_baseline` | Pure ViT (from scratch) on raw spectrogram patches | preliminary results (85/15) — needs rerun — [VIT_BASELINE.md](VIT_BASELINE.md) |
-| `rf_baseline` | MFCC + Random Forest | run pending — [RF_BASELINE.md](RF_BASELINE.md) |
-| `cnn_transformer` | CNN front-end + Transformer encoder (main model) | implemented — [CNN_TRANSFORMER.md](CNN_TRANSFORMER.md) |
-| `pretrained_transformer` | Pretrained ViT fine-tuned on spectrograms | implemented — compare vs `vit_baseline` |
+| `cnn_baseline` | ResNet-18 on mel-spectrograms | done — 3 seeds, HP search complete — [CNN_BASELINE.md](CNN_BASELINE.md) |
+| `vit_baseline` | Pure ViT (from scratch) on raw spectrogram patches | done — 3 seeds, HP search complete — [VIT_BASELINE.md](VIT_BASELINE.md) |
+| `rf_baseline` | MFCC + Random Forest | done — 12-combo HP grid, test eval complete — [RF_BASELINE.md](RF_BASELINE.md) |
+| `cnn_transformer` | CNN front-end + Transformer encoder (main model) | done — 3 seeds, HP search complete — [CNN_TRANSFORMER.md](CNN_TRANSFORMER.md) |
+| `pretrained_transformer` | Pretrained ViT fine-tuned on spectrograms | done — 3 seeds — [PRETRAINED_TRANSFORMER.md](PRETRAINED_TRANSFORMER.md) |

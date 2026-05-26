@@ -13,8 +13,8 @@ Budget control (PROBLEMSETTING.md §HP Tuning — "small candidate grid via rand
 After picking the best HP config, run a final full-data retrain:
 
     python train.py --model cnn_transformer \\
-        --model_kwargs '{"d_model": 256, "n_layers": 4, "n_heads": 8}' \\
-        --epochs 15 --warmup_epochs 5 --label_smoothing 0.1
+        --model_kwargs '{"num_cnn_blocks": 4, "d_model": 256, "n_layers": 4, "n_heads": 4, "dropout": 0.2}' \\
+        --epochs 15 --lr 3e-4 --weight_decay 0.05 --warmup_epochs 5 --label_smoothing 0.1
 
 Results are written to ``--output_dir/hp_results_<model>.jsonl`` (one line per trial)
 and a summary is printed at the end.
