@@ -17,10 +17,14 @@ All models trained on the full BirdCLEF 2026 dataset (K=206 species, 70/15/15 st
 | Model | epochs | lr | weight_decay | warmup_epochs | label_smoothing | batch_size | other |
 |---|---|---|---|---|---|---|---|
 | `rf_baseline` | — | — | — | — | — | — | n_mfcc=20, n_estimators=300, max_depth=20 |
-| `vit_baseline` | 15 | 3e-4 | 0.05 | 5 | 0.1 | 128 | grad_clip=1.0 |
-| `cnn_baseline` | 15 | 1e-3 | 1e-4 | 5 | 0.1 | 256 | — |
-| `cnn_transformer` | 15 | 3e-4 | 0.05 | 5 | 0.1 | 256 | num_cnn_blocks=4, d_model=256, n_layers=4, n_heads=4, dropout=0.2 |
+| `vit_baseline` | 15¹ | 3e-4 | 0.05 | 5 | 0.1 | 128 | grad_clip=1.0 |
+| `cnn_baseline` | 15² | 1e-3 | 1e-4 | 5 | 0.1 | 256 | — |
+| `cnn_transformer` | 15³ | 3e-4 | 0.05 | 5 | 0.1 | 256 | num_cnn_blocks=4, d_model=256, n_layers=4, n_heads=4, dropout=0.2 |
 | `pretrained_transformer` | 15 | 1e-4 | 0.05 | 5 | 0.1 | 128 | — |
+
+¹ `vit_baseline` seed-42 ran 30 epochs; seeds 123 and 456 used the 15-epoch config above.  
+² `cnn_baseline` seed-42 ran 5 epochs with CosineAnnealingLR (no warmup, no label smoothing); seeds 123 and 456 used the 15-epoch config above.  
+³ `cnn_transformer` seed 456 ran 25 epochs at lr=1e-4; seeds 42 and 123 used the 15-epoch, lr=3e-4 config above. Results are directionally consistent — see [CNN_TRANSFORMER.md](CNN_TRANSFORMER.md).
 
 ### Results
 

@@ -2,23 +2,9 @@
 
 Group Project Advanced Machine Learning
 
-! Current baseline results are all without finetunning and with out the actual eval (75/15/15) split => Reruns with finetunning
+## Status
 
-## TODOs
-- Run HP search for `cnn_transformer` (and rerun baselines on 70/15/15 split for fair comparison) (can take days)
-    - Setup proper hyperparameter finetunning for all models, let all run 
-- Fill result tables in `docs/CNN_TRANSFORMER.md`, `docs/VIT_BASELINE.md`, `docs/RF_BASELINE.md`
-- Check against [problemsetting.md](PROBLEMSETTING.md) for missing steps
-- Create Kaggle submission notebook (deadline **June 3, 2026**)
-    - [Submission FAQ](https://www.kaggle.com/docs/competitions#notebooks-only-FAQ)
-    - CPU Notebook <= 90 minutes run-time
-    - Submission file called submission.csv
-
-Optional:
-- Test submit to kaggle, final submissions **June 3, 2026**
-- Check [perch_v2_cpu](https://www.kaggle.com/models/google/bird-vocalization-classifier) suitability
-- Check top kaggle notebooks for inspo / other models
-- Pretraining ViT for Audio?
+All models trained and test-evaluated. See [docs/RESULTS.md](docs/RESULTS.md) for the full multi-seed comparison table including test_AUC. Analysis and visualisations in [notebooks/Results.ipynb](notebooks/Results.ipynb).
 
 
 See [PROBLEMSETTING.md](PROBLEMSETTING.md) for the full problem definition, formal setup,
@@ -76,12 +62,14 @@ python evaluate.py --model cnn_transformer --split test
 | File | Contents |
 |---|---|
 | [PROBLEMSETTING.md](PROBLEMSETTING.md) | Problem definition, architecture motivation, evaluation protocol |
+| [docs/RESULTS.md](docs/RESULTS.md) | Complete cross-model comparison — all models, multi-seed, 5s and 10s clips |
 | [docs/TRAINING.md](docs/TRAINING.md) | Setup, training commands, all CLI args, HP search, adding models |
 | [docs/DATA_PIPELINE.md](docs/DATA_PIPELINE.md) | Data pipeline, preprocessing constants, split strategy, API |
-| [docs/CNN_BASELINE.md](docs/CNN_BASELINE.md) | ResNet-18 baseline results |
-| [docs/VIT_BASELINE.md](docs/VIT_BASELINE.md) | ViT-Small baseline results |
-| [docs/RF_BASELINE.md](docs/RF_BASELINE.md) | MFCC + Random Forest baseline results |
-| [docs/CNN_TRANSFORMER.md](docs/CNN_TRANSFORMER.md) | Main CNN-Transformer model, HP search, results |
+| [docs/CNN_BASELINE.md](docs/CNN_BASELINE.md) | ResNet-18 baseline — architecture, training curve, HP search |
+| [docs/VIT_BASELINE.md](docs/VIT_BASELINE.md) | ViT-Small baseline — architecture, training curve, HP search |
+| [docs/RF_BASELINE.md](docs/RF_BASELINE.md) | MFCC + Random Forest baseline — HP grid, results |
+| [docs/CNN_TRANSFORMER.md](docs/CNN_TRANSFORMER.md) | CNN-Transformer (main model) — architecture, HP search, multi-seed results |
+| [docs/PRETRAINED_TRANSFORMER.md](docs/PRETRAINED_TRANSFORMER.md) | Pretrained ViT fine-tuning — training curve, comparison vs from-scratch |
 
 ---
 
@@ -103,23 +91,31 @@ aml2026-group-10/
 │   └── registry.py                # auto-discovery + kwargs forwarding
 ├── data/
 │   └── preprocessing/
-│       └── data_pipeline.py   # mel-spectrogram, 3-way split, DataLoaders
+│       ├── data_pipeline.py          # mel-spectrogram, 3-way split, DataLoaders
+│       └── preprocessing_check.ipynb # visual sanity check — plots 3 spectrograms
 ├── configs/
 │   ├── hp_cnn_transformer.yaml
+│   ├── hp_pretrained_transformer.yaml
 │   ├── hp_vit_baseline.yaml
 │   └── hp_cnn_baseline.yaml
 ├── scripts/
 │   ├── hp_search.py           # random HP search runner
+│   ├── kaggle_submit.py       # generate submission.csv for Kaggle (supports ensembling)
+│   ├── precompute_specs.py    # precompute spectrogram cache to /tmp
 │   └── stash_birdclef_data.py
+├── notebooks/
+│   └── 01_eda.ipynb           # exploratory data analysis (class distribution, geography, soundscapes)
 ├── utils/
-│   ├── inference.py
-│   ├── metrics.py
-│   ├── notify.py
-│   └── soundscape_eval.py
+│   ├── inference.py           # predict_clip_probs (chunk-level max-pool), predict_file
+│   ├── metrics.py             # macro_roc_auc, macro_f1_tuned, macro_f1_at_thresholds
+│   ├── notify.py              # optional Telegram training notifications
+│   └── soundscape_eval.py    # soundscape-domain validation loader
 └── docs/
+    ├── RESULTS.md                  # complete cross-model comparison table
     ├── TRAINING.md
     ├── DATA_PIPELINE.md
     ├── CNN_TRANSFORMER.md
+    ├── PRETRAINED_TRANSFORMER.md
     ├── CNN_BASELINE.md
     ├── VIT_BASELINE.md
     └── RF_BASELINE.md

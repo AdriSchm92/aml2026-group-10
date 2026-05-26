@@ -35,7 +35,13 @@ Scheduler: 5-epoch linear warmup → cosine decay. SpecAugment enabled.
 
 Best checkpoint: epoch 15 — **val_AUC 0.9537, val_F1 0.5753**
 
-The model converges dramatically faster than `vit_baseline` (same architecture, no pretraining): AUC 0.9061 by epoch 4 vs epoch 12 for `vit_baseline`. Transfer learning from ImageNet effectively provides the local feature detectors that the from-scratch ViT had to learn slowly. AUC continues improving through epoch 15 with no sign of overfitting, suggesting more epochs would help.
+The model converges dramatically faster than `vit_baseline` (same architecture, no pretraining): it reaches AUC 0.9061 at epoch 4 alone, while the from-scratch ViT peaks at only 0.8922 after 13 epochs out of 30. Transfer learning from ImageNet effectively provides the local feature detectors that the from-scratch ViT had to learn slowly. AUC continues improving through epoch 15 with no sign of overfitting, suggesting more epochs would help.
+
+---
+
+## HP Search
+
+A config file (`configs/hp_pretrained_transformer.yaml`) was prepared for HP search over `vit_model`, `drop_path_rate`, `drop_rate`, `lr`, and `weight_decay`. HP search was not run — the training config above follows standard fine-tuning practice (10× lower LR than from-scratch ViT, same regularisation), validated by the multi-seed results.
 
 ---
 
@@ -56,11 +62,23 @@ python train.py --model pretrained_transformer \
 
 | Model | val_AUC | val_F1 | Best epoch | Params |
 |---|---|---|---|---|
-| `vit_baseline` (from scratch) | 0.8922 | 0.3363 | 12 / 30 | ~22M |
+| `vit_baseline` (from scratch) | 0.8922 | 0.3479 | 13 / 30 | ~22M |
 | `pretrained_transformer` (ImageNet) | 0.9537 | 0.5753 | 15 / 15 | ~22M |
 
-Delta from pretraining alone: **+0.061 AUC, +0.239 F1**. This is the largest single gain in the comparison table and isolates the value of ImageNet transfer for audio spectrogram classification.
+Delta from pretraining alone: **+0.062 AUC, +0.227 F1**. This is the largest single gain in the comparison table and isolates the value of ImageNet transfer for audio spectrogram classification.
+
+## Multi-seed robustness (70/15/15 split)
+
+| Seed | best val_AUC | best val_F1 | Notes |
+|------|-------------|-------------|-------|
+| 42   | 0.9537      | 0.5753      | 15 epochs, lr=1e-4 |
+| 123  | 0.9602      | —           | 15 epochs, lr=1e-4 |
+| 456  | 0.9512      | —           | 15 epochs, lr=1e-4 |
+| **mean** | **0.9550** | — | |
+| **std**  | **0.0037** | — | |
+
+Lowest seed variance of all models (std=0.0037 vs cnn_baseline 0.0192, cnn_transformer 0.0092) — ImageNet pretraining provides a stable initialisation that makes the final checkpoint robust to random seed differences in data split and weight init.
 
 ## Comparison across all models (70/15/15 split, seed=42)
 
-See [CNN_TRANSFORMER.md](CNN_TRANSFORMER.md#comparison-70-15-15-split-seed-42) for the full table.
+See [CNN_TRANSFORMER.md](CNN_TRANSFORMER.md#comparison-70-15-15-split-seed-42) for the full table. Cross-model mean val_AUC in [RESULTS.md](RESULTS.md).

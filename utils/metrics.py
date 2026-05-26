@@ -34,6 +34,30 @@ def macro_roc_auc(y_true: np.ndarray, y_score: np.ndarray):
     return macro, per_class
 
 
+def macro_f1_at_thresholds(
+    y_true: np.ndarray,
+    y_score: np.ndarray,
+    thresholds: np.ndarray,
+) -> float:
+    """Apply fixed per-class thresholds directly; return macro F1. No search.
+
+    Use this for test evaluation to apply val-tuned thresholds without any
+    test-set search (which would be leakage).
+    """
+    y_true = np.asarray(y_true)
+    y_score = np.asarray(y_score)
+    num_classes = y_true.shape[1]
+    f1s = [
+        f1_score(
+            y_true[:, k],
+            (y_score[:, k] >= thresholds[k]).astype(np.int32),
+            zero_division=0,
+        )
+        for k in range(num_classes)
+    ]
+    return float(np.mean(f1s)) if f1s else float("nan")
+
+
 def macro_f1_tuned(
     y_true: np.ndarray,
     y_score: np.ndarray,

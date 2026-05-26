@@ -37,7 +37,7 @@ from data.preprocessing.data_pipeline import build_dataloaders  # noqa: E402
 from models.registry import load_model  # noqa: E402
 from train import resolve_data_root, resolve_output_dir  # noqa: E402
 from utils.inference import predict_clip_probs  # noqa: E402
-from utils.metrics import macro_f1_tuned, macro_roc_auc  # noqa: E402
+from utils.metrics import macro_f1_at_thresholds, macro_f1_tuned, macro_roc_auc  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -156,8 +156,8 @@ def main() -> None:
         threshold_source = f"val_epoch_{ckpt.get('epoch', '?')}"
         y_true, y_score = predict_clip_probs(model, test_loader, device)
         auc, per_class = macro_roc_auc(y_true, y_score)
-        # Apply the val-tuned thresholds to compute test F1.
-        f1, _ = macro_f1_tuned(y_true, y_score, thresholds=tuned_thr)
+        # Apply the val-tuned thresholds directly — no search on test data.
+        f1 = macro_f1_at_thresholds(y_true, y_score, tuned_thr)
         print(f"Using val-tuned thresholds (epoch {ckpt.get('epoch', '?')}) on test set.")
 
     valid_mask = ~np.isnan(per_class)

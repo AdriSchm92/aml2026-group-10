@@ -94,18 +94,37 @@ python scripts/hp_search.py --model vit_baseline --n_trials 6 \
 
 Key observations: `lr=1e-3` collapses training in all three trials (AUC 0.65–0.71), confirming ViT from scratch requires careful LR selection — same pattern as CNN-Transformer. `weight_decay=0.05` (stronger regularisation) consistently outperforms `0.01`. Lower LR (1e-4) with high dropout (0.1+0.1) gives the best result.
 
+**Note:** The HP-search best config (lr=1e-4) was not applied to the multi-seed comparison runs, which used lr=3e-4 to keep all seeds on the same config as the original seed-42 run. Running the multi-seed comparison at lr=1e-4 would likely push the mean above 0.9002.
+
 ---
 
-## Comparison vs CNN baseline
+## Multi-seed robustness (70/15/15 split)
 
-| Model | val_AUC | val_F1 | Params | Split |
+Seed 42 is the original 30-epoch run above. Seeds 123 and 456 used the standard multi-seed config: 15 epochs, lr=3e-4, weight_decay=0.05, warmup_epochs=5, label_smoothing=0.1, batch_size=128, grad_clip=1.0.
+
+| Seed | best val_AUC | Notes |
+|------|-------------|-------|
+| 42   | 0.8922      | epoch 13 / 30, 30-epoch run |
+| 123  | 0.8995      | 15 epochs, lr=3e-4 |
+| 456  | 0.9089      | 15 epochs, lr=3e-4 |
+| **mean** | **0.9002 ± 0.0084** | |
+
+Seeds 123 and 456 both exceed seed 42, consistent with random variation across data splits. The mean (0.9002) is more representative than the single seed-42 value.
+
+---
+
+## Comparison
+
+All models at 70/15/15 split, seed=42. Multi-seed means from [RESULTS.md](RESULTS.md).
+
+| Model | val_AUC (seed 42) | val_F1 (seed 42) | mean val_AUC (3 seeds) | Params |
 |---|---|---|---|---|
-| `cnn_baseline` (ResNet-18) | 0.9540 | 0.4844 | ~11M | 70/15/15 |
-| `vit_baseline` (ViT-Small) | 0.8922 | 0.3363 | ~22M | 70/15/15 |
+| `rf_baseline` (MFCC + RF) | 0.7690 | 0.1696 | — | — |
+| `vit_baseline` (ViT-Small, scratch) | 0.8922 | 0.3479 | 0.9002 ± 0.0084 | ~22M |
+| `cnn_baseline` (ResNet-18) | 0.9540 | 0.4844 | 0.9278 ± 0.0192 | ~11M |
+| `cnn_transformer` | 0.9498 | 0.2334 | 0.9371 ± 0.0092 | ~18M |
+| `pretrained_transformer` (ViT-Small, ImageNet) | 0.9537 | 0.5753 | 0.9550 ± 0.0037 | ~22M |
 
-Delta: −0.062 AUC, −0.148 F1. This isolates the value of CNN inductive bias — local time-frequency pattern detection (harmonics, chirp onsets) that raw 16×16 patch projections cannot capture without a convolutional front-end.
+**Delta ViT-from-scratch vs CNN baseline (seed 42):** −0.062 AUC, −0.137 F1. This isolates the value of CNN inductive bias — local time-frequency pattern detection (harmonics, chirp onsets) that raw 16×16 patch projections cannot capture without a convolutional front-end.
 
-## Next comparison models
-
-1. `pretrained_transformer` — same ViT-Small architecture but with ImageNet pretraining — [docs/TRAINING.md](TRAINING.md)
-2. `cnn_transformer` — CNN front-end + Transformer encoder (main proposed model) — [docs/CNN_TRANSFORMER.md](CNN_TRANSFORMER.md)
+**Delta ViT-from-scratch vs pretrained ViT (seed 42):** −0.062 AUC, −0.227 F1. The entire gap is due to initialisation — the architecture is identical. See [PRETRAINED_TRANSFORMER.md](PRETRAINED_TRANSFORMER.md) for details.
