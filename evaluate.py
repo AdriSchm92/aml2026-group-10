@@ -126,7 +126,12 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model_kwargs = ckpt.get("model_kwargs", {}) or {}
     model = load_model(ckpt["model_name"], num_classes, **model_kwargs).to(device)
-    model.load_state_dict(ckpt["model_state"])
+
+    state_dict = ckpt["model_state"]
+    # Strip _orig_mod. prefix added by torch.compile
+    if any(k.startswith("_orig_mod.") for k in state_dict):
+        state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+    model.load_state_dict(state_dict)
     model.eval()
 
     if args.split == "val":
