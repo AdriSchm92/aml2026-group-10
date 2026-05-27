@@ -53,7 +53,35 @@ python train.py --model cnn_baseline \
 python train.py --model cnn_baseline --epochs 1 --batch_size 8 --limit_train_batches 4 --limit_val_batches 4
 ```
 
-Key CLI args: `--epochs`, `--batch_size`, `--lr`, `--weight_decay`, `--val_size`, `--test_size`, `--seed`, `--grad_clip`, `--tag` (checkpoint name suffix), `--no-amp` (disable mixed precision).
+Key CLI args: `--epochs`, `--batch_size`, `--lr`, `--weight_decay`, `--val_size`, `--test_size`, `--seed`, `--grad_clip`, `--tag` (checkpoint name suffix), `--no-amp` (disable mixed precision), `--checkpoint_metric`, `--taxonomy_csv`.
+
+### Dual-track checkpointing (report vs Kaggle)
+
+Two training tracks share the same pipeline but differ in checkpoint selection and label space.
+
+**Track A — Report / ablations (default)** — fair architecture comparison on clean-audio val (PROBLEMSETTING):
+
+```bash
+python train.py --model cnn_transformer --tag report
+```
+
+- `--checkpoint_metric val_auc` (default), K=206, output `best_<model>_report.pt`
+- Use for RESULTS.md, `evaluate.py --split test`, HP search
+
+**Track B — Kaggle submission** — optimises soundscape generalization (competition scope correction):
+
+```bash
+python train.py --model cnn_transformer \
+    --checkpoint_metric sc_auc \
+    --taxonomy_csv taxonomy.csv \
+    --tag kaggle
+```
+
+- K=234 via `--taxonomy_csv`, output `best_<model>_kaggle.pt`
+- Submit via `notebooks/submission.ipynb` or `scripts/kaggle_submit.py`
+
+Soundscape val holdout files are excluded from training (no leakage). Thresholds in checkpoints
+are always tuned on clean val (`thresholds_source: clean_val`); Kaggle ROC-AUC uses raw sigmoid probs.
 
 ### Data split args
 
@@ -62,6 +90,9 @@ Key CLI args: `--epochs`, `--batch_size`, `--lr`, `--weight_decay`, `--val_size`
 | `--val_size` | 0.15 | Fraction of recordings held out for validation |
 | `--test_size` | 0.15 | Fraction of recordings held out for final test (built but never touched during training) |
 | `--data_subset_min_recordings N` | None | Restrict to species with ≥ N recordings (K=69 at N=200). Use for HP search or quick experiments. |
+| `--soundscape_val_size` | 0.2 | Fraction of soundscape *files* held out for `sc_auc` (excluded from training) |
+| `--checkpoint_metric` | `val_auc` | `val_auc` (report) or `sc_auc` (Kaggle submission) |
+| `--taxonomy_csv` | None | Path to `taxonomy.csv` for K=234 label space (Kaggle track) |
 
 All models should use the same `--val_size`, `--test_size`, and `--seed` for results to be directly comparable.
 

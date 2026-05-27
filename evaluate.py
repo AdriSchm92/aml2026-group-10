@@ -105,6 +105,12 @@ def main() -> None:
     print(f"Loading checkpoint:    {ckpt_path}")
     ckpt = torch.load(ckpt_path, map_location="cpu")
     num_classes = ckpt["num_classes"]
+    ckpt_args = ckpt.get("args", {}) or {}
+
+    taxonomy_path: str | None = None
+    if ckpt_args.get("taxonomy_csv"):
+        p = Path(ckpt_args["taxonomy_csv"])
+        taxonomy_path = str(p if p.is_file() else data_root / ckpt_args["taxonomy_csv"])
 
     _, val_loader, test_loader, mlb = build_dataloaders(
         metadata_csv=str(data_root / "train.csv"),
@@ -118,6 +124,7 @@ def main() -> None:
         random_state=args.seed,
         duration_cache_path=(os.environ.get("BIRDCLEF_DURATION_CACHE") or None),
         spec_cache_dir=args.spec_cache_dir,
+        taxonomy_csv=taxonomy_path,
     )
 
     if len(mlb.classes_) != num_classes:
@@ -166,6 +173,11 @@ def main() -> None:
     print(f"Model           : {ckpt['model_name']}  (K={num_classes})")
     print(f"Train-time epoch: {ckpt.get('epoch', '?')}  "
           f"val_auc={ckpt.get('val_auc', float('nan')):.4f}")
+    if "sc_auc" in ckpt:
+        print(f"                  sc_auc={ckpt.get('sc_auc', float('nan')):.4f}  "
+              f"checkpoint_metric={ckpt.get('checkpoint_metric', 'val_auc')}")
+    if ckpt.get("thresholds_source"):
+        print(f"Thresholds from : {ckpt['thresholds_source']}")
     print(f"Macro ROC-AUC   : {auc:.4f}   "
           f"({valid_mask.sum()}/{num_classes} classes with ≥1 pos)")
     print(f"Macro F1 ({threshold_source}): {f1:.4f}")

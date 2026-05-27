@@ -335,6 +335,8 @@ def build_dataloaders(
     verbose_data    : bool  = False,
     min_recordings  : int | None = None,
     spec_cache_dir  : str | None = None,
+    soundscape_val_files: set[str] | frozenset[str] | None = None,
+    taxonomy_csv    : str | None = None,
 ):
     """Builds train / val / test DataLoaders from both data sources.
 
@@ -363,6 +365,11 @@ def build_dataloaders(
         spec_cache_dir  : local directory for pre-computed spectrogram cache.
                           Must be a fast LOCAL path (e.g. /tmp/birdclef_specs),
                           not a network mount. See BIRDCLEF_SPEC_CACHE env var.
+        soundscape_val_files: file paths held out for soundscape val — excluded
+                          from training soundscape segments (no leakage).
+        taxonomy_csv    : if set, fit MLB on all species in this file (K=234
+                          for BirdCLEF 2026) instead of train.csv primary labels
+                          only (K=206). Used for Kaggle-track training.
 
     Returns:
         train_loader, val_loader, test_loader, label_encoder (MultiLabelBinarizer)
@@ -424,19 +431,42 @@ def build_dataloaders(
         f"[seed={random_state}]"
     )
 
-    # ── 4. Fit label encoder on the (filtered) full df ────────────────────────
-    # Fit before split so val/test species are always in the label space.
+    # ── 4. Fit label encoder ──────────────────────────────────────────────────
+    # Default: train.csv primary labels (K=206, PROBLEMSETTING report track).
+    # taxonomy_csv: full competition taxonomy (K=234, Kaggle track).
     mlb = MultiLabelBinarizer()
-    mlb.fit([[s] for s in sorted(df['primary_label'].unique())])
-    print(f"Number of classes K: {len(mlb.classes_)}")
+    if taxonomy_csv:
+        tax_df = pd.read_csv(taxonomy_csv)
+        label_col = None
+        for col in ("primary_label", "ebird_code", "species_code"):
+            if col in tax_df.columns:
+                label_col = col
+                break
+        if label_col is None:
+            raise ValueError(
+                f"taxonomy_csv {taxonomy_csv} needs primary_label (or ebird_code) column; "
+                f"got {list(tax_df.columns)}"
+            )
+        mlb.fit([[s] for s in sorted(tax_df[label_col].unique())])
+        print(f"MLB fit on taxonomy ({taxonomy_csv}, col={label_col}): K={len(mlb.classes_)}")
+    else:
+        mlb.fit([[s] for s in sorted(df['primary_label'].unique())])
+        print(f"Number of classes K: {len(mlb.classes_)}")
 
     # ── 5. Build sample lists ─────────────────────────────────────────────────
     train_audio_samples = build_samples_from_train_audio(
         train_df, audio_dir, duration_cache_path, verbose_data, "train"
     )
-    soundscape_samples = build_samples_from_soundscapes(
-        soundscapes_csv, soundscapes_dir
-    )
+    exclude = soundscape_val_files or set()
+    soundscape_samples = [
+        s for s in build_samples_from_soundscapes(soundscapes_csv, soundscapes_dir)
+        if s["file_path"] not in exclude
+    ]
+    if exclude:
+        print(
+            f"Soundscape training segments: {len(soundscape_samples)} "
+            f"(excluded {len(exclude)} val file(s))"
+        )
     val_samples = build_samples_from_train_audio(
         val_df, audio_dir, duration_cache_path, verbose_data, "val"
     )

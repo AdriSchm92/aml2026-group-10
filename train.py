@@ -48,11 +48,15 @@ from data.preprocessing.data_pipeline import build_dataloaders  # noqa: E402
 from models.registry import available_models, load_model  # noqa: E402
 from utils.inference import predict_val_probs  # noqa: E402
 from utils.metrics import macro_f1_tuned, macro_roc_auc  # noqa: E402
-from utils.soundscape_eval import build_soundscape_val_loader  # noqa: E402
+from utils.soundscape_eval import (  # noqa: E402
+    build_soundscape_val_loader,
+    split_soundscape_val_files,
+)
 
 
 class TrainingRunSummary(TypedDict):
-    best_auc: float
+    best_score: float
+    checkpoint_metric: str
     checkpoint: str
     metrics: str
 
@@ -241,8 +245,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--grad_clip", type=float, default=1.0)
     p.add_argument("--soundscape_val_size", type=float, default=0.2,
                    help="Fraction of soundscape *files* held out for domain-shift "
-                        "eval. Logged each epoch but never used for checkpointing. "
+                        "eval (sc_auc). Excluded from training. "
                         "0.0 disables soundscape val.")
+    p.add_argument(
+        "--checkpoint_metric",
+        choices=["val_auc", "sc_auc"],
+        default="val_auc",
+        help="Metric for best-checkpoint selection. Default val_auc (report track). "
+             "Use sc_auc for Kaggle submission models.",
+    )
+    p.add_argument(
+        "--taxonomy_csv",
+        default=None,
+        help="Path to taxonomy.csv for K=234 label space (Kaggle track). "
+             "Relative paths resolve against --data_root.",
+    )
     p.add_argument("--warmup_epochs", type=int, default=0,
                    help="Linear LR warmup epochs before cosine decay. "
                         "0 = disabled (original CosineAnnealingLR). "
@@ -354,6 +371,19 @@ def run_training(args: argparse.Namespace) -> TrainingRunSummary:
             raise ValueError(f"--model_kwargs is not valid JSON: {args.model_kwargs}") from e
 
     t0 = time.perf_counter()
+    sc_val_files = split_soundscape_val_files(
+        soundscapes_csv=str(data_root / "train_soundscapes_labels.csv"),
+        soundscapes_dir=str(data_root / "train_soundscapes"),
+        val_size=args.soundscape_val_size,
+        random_state=args.seed,
+    )
+    taxonomy_path: str | None = None
+    if getattr(args, "taxonomy_csv", None):
+        p = Path(args.taxonomy_csv)
+        taxonomy_path = str(p if p.is_file() else data_root / args.taxonomy_csv)
+        if not Path(taxonomy_path).is_file():
+            raise FileNotFoundError(f"--taxonomy_csv not found: {taxonomy_path}")
+
     train_loader, val_loader, test_loader, mlb = build_dataloaders(
         metadata_csv=str(data_root / "train.csv"),
         audio_dir=str(data_root / "train_audio"),
@@ -368,11 +398,13 @@ def run_training(args: argparse.Namespace) -> TrainingRunSummary:
         verbose_data=args.verbose_data,
         min_recordings=getattr(args, "data_subset_min_recordings", None),
         spec_cache_dir=getattr(args, "spec_cache_dir", None),
+        soundscape_val_files=sc_val_files,
+        taxonomy_csv=taxonomy_path,
     )
     print(f"build_dataloaders: {time.perf_counter() - t0:.2f}s  (DataLoader num_workers={args.num_workers})")
     print(f"Test set size     : {len(test_loader.dataset)} samples (held out — not used during training)")
 
-    _, sc_val_loader = build_soundscape_val_loader(
+    sc_val_loader, _ = build_soundscape_val_loader(
         soundscapes_csv=str(data_root / "train_soundscapes_labels.csv"),
         soundscapes_dir=str(data_root / "train_soundscapes"),
         mlb=mlb,
@@ -380,6 +412,7 @@ def run_training(args: argparse.Namespace) -> TrainingRunSummary:
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         random_state=args.seed,
+        val_files=sc_val_files,
     )
 
     num_classes = len(mlb.classes_)
@@ -439,7 +472,13 @@ def run_training(args: argparse.Namespace) -> TrainingRunSummary:
     ckpt_path = output_dir / f"best_{args.model}{tag}.pt"
     metrics_path = output_dir / f"metrics_{args.model}{tag}.jsonl"
     metrics_path.write_text("")
-    best_auc = -1.0
+    checkpoint_metric_name = args.checkpoint_metric
+    track = (
+        "kaggle"
+        if args.tag == "kaggle" or checkpoint_metric_name == "sc_auc"
+        else "report"
+    )
+    best_score = -1.0
 
     val_batches = cap_loader(val_loader, args.limit_val_batches)
 
@@ -486,8 +525,15 @@ def run_training(args: argparse.Namespace) -> TrainingRunSummary:
                 row["sc_f1"]  = sc_f1
             f.write(json.dumps(row) + "\n")
 
-        if not np.isnan(auc) and auc > best_auc:
-            best_auc = auc
+        if checkpoint_metric_name == "sc_auc" and sc_val_loader is not None:
+            score = sc_auc if not np.isnan(sc_auc) else auc
+        else:
+            score = auc
+
+        if not np.isnan(score) and score > best_score:
+            best_score = score
+            ckpt_sc_auc = sc_auc if sc_val_loader is not None else float("nan")
+            ckpt_sc_f1 = sc_f1 if sc_val_loader is not None else float("nan")
             torch.save(
                 {
                     "model_state": model.state_dict(),
@@ -495,21 +541,31 @@ def run_training(args: argparse.Namespace) -> TrainingRunSummary:
                     "num_classes": num_classes,
                     "classes": list(mlb.classes_),
                     "thresholds": thresholds.tolist(),
+                    "thresholds_source": "clean_val",
                     "epoch": epoch,
                     "val_auc": auc,
                     "val_f1": f1,
+                    "sc_auc": ckpt_sc_auc,
+                    "sc_f1": ckpt_sc_f1,
+                    "checkpoint_metric": checkpoint_metric_name,
+                    "track": track,
                     "args": vars(args),
                     "model_kwargs": model_kwargs,
                 },
                 ckpt_path,
             )
-            print(f"  -> saved {ckpt_path.name} (val_auc={auc:.4f})")
+            print(
+                f"  -> saved {ckpt_path.name} "
+                f"({checkpoint_metric_name}={score:.4f})"
+            )
 
-    print(f"Done. Best val AUC: {best_auc:.4f}")
+    metric_label = checkpoint_metric_name.replace("_", " ")
+    print(f"Done. Best {metric_label}: {best_score:.4f}")
     print(f"Checkpoint: {ckpt_path}")
     print(f"Metrics   : {metrics_path}")
     return {
-        "best_auc": best_auc,
+        "best_score": best_score,
+        "checkpoint_metric": checkpoint_metric_name,
         "checkpoint": str(ckpt_path),
         "metrics": str(metrics_path),
     }
@@ -552,5 +608,5 @@ if __name__ == "__main__":
     else:
         training_event(
             "finished",
-            f"best_auc={out['best_auc']:.4f}\ncheckpoint={out['checkpoint']}\nmetrics={out['metrics']}",
+            f"{out['checkpoint_metric']}={out['best_score']:.4f}\ncheckpoint={out['checkpoint']}\nmetrics={out['metrics']}",
         )
