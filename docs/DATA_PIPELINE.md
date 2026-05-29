@@ -55,13 +55,20 @@ Each audio clip goes through the following steps in `__getitem__`:
 
 ## Label Encoding
 
-Labels are encoded as **multi-hot binary vectors** of shape `(K,)` where `K = 206`
-(all species in `train_audio`). The `MultiLabelBinarizer` provides a fixed, sorted
-mapping from species code strings to vector indices.
+Labels are encoded as **multi-hot binary vectors** of shape `(K,)`:
+
+| Mode | K | MLB fit source | Use case |
+| ---- | --- | -------------- | -------- |
+| Default (report track) | 206 | `train.csv` primary labels | PROBLEMSETTING architecture comparison |
+| Kaggle track | 234 | `taxonomy.csv` via `taxonomy_csv=` | Competition submission (all test species) |
+
+The `MultiLabelBinarizer` provides a fixed, sorted mapping from species code strings to vector indices.
 
 - `train_audio` samples: exactly one active label per clip (label sum = 1)
 - `train_soundscapes` samples: one or more active labels per segment (label sum ≥ 1)
-- Soundscape species not in `train_audio` are silently ignored
+- With K=206: soundscape species outside `train_audio` are silently ignored
+- With K=234 (taxonomy): all competition species are in label space; soundscape segments
+  can provide training signal for the 28 species absent from `train_audio`
 
 ---
 
@@ -73,16 +80,22 @@ Three-way stratified split by `primary_label` (PROBLEMSETTING.md §Evaluation Pr
 train.csv (35,549 recordings, 206 species)
          │
          ├── ~70% → Training set
-         │         + all labeled train_soundscapes segments
+         │         + train_soundscapes segments (minus soundscape val holdout)
          │         + SpecAugment augmentation enabled
          │
          ├── ~15% → Validation set (stratified, no augmentation)
-         │         used for: per-epoch metrics, checkpoint selection,
-         │         per-class threshold tuning, HP selection
+         │         used for: per-epoch metrics, threshold tuning, HP selection
+         │         checkpoint selection when --checkpoint_metric val_auc (default)
          │
          └── ~15% → Test set (stratified, no augmentation)
                    used only for final reporting via evaluate.py --split test
                    thresholds are NEVER tuned on the test set
+
+train_soundscapes/ (parallel holdout, file-level):
+         │
+         └── ~20% of files → sc_val (domain-shift eval, sc_auc)
+                             excluded from training (no leakage)
+                             checkpoint selection when --checkpoint_metric sc_auc
 ```
 
 Singleton-class recordings (only 1 example) are moved to train only.
@@ -120,6 +133,8 @@ train_loader, val_loader, test_loader, mlb = build_dataloaders(
     num_workers     = 4,
     random_state    = 42,
     min_recordings  = None,   # set to 200 for K=69 HP search subset
+    soundscape_val_files = None,  # set of held-out soundscape file paths
+    taxonomy_csv    = None,   # path to taxonomy.csv for K=234 (Kaggle track)
 )
 ```
 
