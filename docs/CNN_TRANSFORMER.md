@@ -12,7 +12,7 @@ Input `(1, 128, 313)` log-mel spectrogram, output `(K,)` per-class logits.
 
 | Component | Implementation | Notes |
 |---|---|---|
-| CNN front-end | Truncated ResNet-18 (`timm`, `features_only=True`) | `num_cnn_blocks=3` → stride 8, `(B, 128, 16, 40)`, 640 tokens (code default). `num_cnn_blocks=4` → stride 16, `(B, 256, 8, 20)`, **160 tokens** (used in training). Override backbone via `cnn_backbone` kwarg (e.g. `"efficientnet_b2"`) |
+| CNN front-end | Truncated ResNet-18 (`timm`, `features_only=True`) | `num_cnn_blocks=3` → stride 8, `(B, 128, 16, 40)`, 640 tokens (code default). `num_cnn_blocks=4` → stride 16, `(B, 256, 8, 20)`, **160 tokens** (used in training).|
 | Channel projection | `Conv2d(C_cnn, d_model, 1)` + `BatchNorm2d` | Decouples transformer width from backbone width |
 | 2D pos embedding | `nn.Parameter(zeros(1, d_model, H', W'))`, `trunc_normal_(std=0.02)` | Preserves time×frequency spatial axes; one vector per grid cell |
 | `[CLS]` token | `nn.Parameter(zeros(1, 1, d_model))`, `trunc_normal_(std=0.02)` | Global representation extracted from position 0 of encoder output |
@@ -27,7 +27,7 @@ Input `(1, 128, 313)` log-mel spectrogram, output `(K,)` per-class logits.
 
 | HP | Default | Notes |
 |---|---|---|
-| `cnn_backbone` | `"resnet18"` | timm model name for CNN front-end. `"efficientnet_b2"` recommended for the final model. |
+| `cnn_backbone` | `"resnet18"` | timm model name for CNN front-end.|
 | `pretrained_cnn` | `False` | ImageNet pretraining for CNN backbone. Set `True` for the final model; auto-skips warm-start from `cnn_baseline.pt`. |
 | `num_cnn_blocks` | 3 | Feature stage index; 3 → stride 8, 4 → stride 16. Exact token count depends on backbone. |
 | `d_model` | 256 | Transformer / projection width |
@@ -141,21 +141,6 @@ Best checkpoint: epoch 14 — val_AUC=0.9068, val_F1=0.3410. Not used in final c
 | `cnn_transformer` | 0.9498 | 0.2334 | 0.9411 | — | ~18M | seed 42 |
 | `pretrained_transformer` (ViT-Small, ImageNet) | 0.9587 | 0.5753 | 0.9588 | — | ~22M | — |
 
-test_AUC values from seed=42 checkpoint, evaluated over ~98/206 classes with ≥1 positive in the test split (class imbalance). Multi-seed mean val_AUC in [RESULTS.md](RESULTS.md).
+test_AUC values from seed=42 checkpoint, evaluated over ~193/206 classes with ≥1 positive in the test split (class imbalance). Multi-seed mean val_AUC in [RESULTS.md](RESULTS.md).
 
 The CNN-Transformer with n_layers=0 would be CNN + projection + MLP head, which is architecturally very close to ResNet-18 + classification head. Comparing our proposed model with the CNN baseline: at seed 42, the CNN-Transformer (0.9498 val_AUC, 0.9411 test_AUC) outperforms the CNN baseline (0.9289 val_AUC, 0.9182 test_AUC). Averaged over 3 seeds, cnn_transformer mean (0.9371) also exceeds cnn_baseline mean (0.9195). The Transformer adds modest but consistent value on top of the CNN front-end.
-
-To ensure the Transformer architecture was given the best conditions to demonstrate its value, we investigated whether the underperformance of the CNN-Transformer was linked to the short 5-second clip duration. The core motivation is that self-attention's strength lies in modelling long-range dependencies — with only ~160 tokens spanning 5 seconds of audio, there may simply not be enough temporal context for the Transformer to add meaningful global reasoning on top of what the CNN already captures locally. To test this hypothesis, we reran all four deep learning models using 10-second clips, which doubles the number of tokens presented to the Transformer (~320 tokens) and provides more temporal context for species-discriminative call patterns such as repeated phrases or response calls.
-
-## Comparison (70/15/15 split, seed=42) with 10s duration clips
-
-Single-seed (42) only. Batch size reduced to 64, LR scaled to 7.5e-5 to accommodate larger memory footprint.
-
-| Model | 5s val_AUC | 10s val_AUC | Delta | Params |
-|---|---|---|---|---|
-| `cnn_baseline` (ResNet-18) | 0.9540 | 0.8671 | −0.087 | ~11M |
-| `vit_baseline` (ViT-Small, scratch) | 0.8922 | 0.9079 | +0.016 | ~22M |
-| `cnn_transformer` | 0.9498 | 0.9335 | −0.016 | ~18M |
-| `pretrained_transformer` (ViT-Small, ImageNet) | 0.9537 | 0.9489 | −0.005 | ~22M |
-
-The results partially support the hypothesis. The ViT baseline is the only model that improves with longer clips (+0.016 AUC): without CNN inductive bias, the from-scratch ViT relies more heavily on global context, and longer clips provide more tokens for self-attention to work with. However, the CNN-Transformer shows no meaningful improvement (0.9335 vs 0.9498 at 5s), suggesting that once a CNN front-end handles local feature extraction, the Transformer component gains little from additional temporal context. The pretrained Transformer remains remarkably stable (0.9489 vs 0.9537), confirming that its strong performance is driven by ImageNet pretraining rather than clip length. Most strikingly, the CNN baseline drops sharply (0.8671 vs 0.9540) — a pure CNN gains nothing from longer sequences and is hurt by the smaller batch size. Taken together, clip duration is a meaningful variable specifically for pure Transformer architectures, while pretraining remains the single most impactful factor.
