@@ -30,7 +30,7 @@ All models trained on the full BirdCLEF 2026 dataset (K=206 species, 70/15/15 st
 
 | Model | seed 42 | seed 123 | seed 456 | mean val_AUC ± std | test_AUC† | Type |
 |---|---|---|---|---|---|---|
-| `rf_baseline` (MFCC + RF) | 0.7690 | 0.7671 | — | — | 0.7729 | No DL |
+| `rf_baseline` (MFCC + RF) | 0.7690 | 0.7671 | 0.7622 | 0.7661 ± 0.0035 | 0.7729 | No DL |
 | `vit_baseline` (ViT-Small, scratch) | 0.8922 | 0.8995 | 0.9089 | 0.9002 ± 0.0084 | 0.9069 | Pure Transformer |
 | `cnn_baseline` (ResNet-18) | 0.9289 | 0.9105 | 0.9190 | 0.9195 ± 0.0075 | 0.9182 | Pure CNN |
 | `cnn_transformer` (ResNet-18 + Transformer) | 0.9498 | 0.9331 | 0.9285 | 0.9371 ± 0.0092 | 0.9411 | Hybrid |
@@ -43,7 +43,7 @@ All models trained on the full BirdCLEF 2026 dataset (K=206 species, 70/15/15 st
 - The pretrained Transformer is the strongest model overall (mean val_AUC=0.9567, test_AUC=0.9588) and the most stable across seeds (std=0.0039), demonstrating the value of ImageNet transfer learning for audio spectrogram classification. Notably, its test_AUC exceeds its mean val_AUC, suggesting good generalisation to held-out data.
 - The CNN-Transformer outperforms the CNN baseline on both mean val_AUC (0.9371 vs 0.9195) and test_AUC (0.9411 vs 0.9182), suggesting the Transformer component does add value on top of the CNN front-end. However the gap is modest and the CNN baseline has lower variance across seeds (std=0.0075 vs 0.0092), indicating the CNN-Transformer's advantage is not fully consistent across data splits.
 - The ViT from scratch is the weakest deep learning model (mean val_AUC=0.9002), confirming the importance of CNN inductive bias for local time-frequency pattern detection. The gap between from-scratch and pretrained ViT (+0.057 AUC) is the largest single gain in the comparison and isolates the value of ImageNet transfer.
-- The RF baseline (val_AUC=0.7690, test_AUC=0.7729) establishes a clear floor, with a −0.187 AUC gap vs the best deep learning model, demonstrating the value of deep feature learning over handcrafted MFCCs. The RF is also the only model where val and test AUC are directly comparable, since its evaluation was built into train_rf.py with an explicit test evaluation step.
+- The RF baseline (mean val_AUC=0.7661, test_AUC=0.7729) establishes a clear floor, with a −0.187 AUC gap vs the best deep learning model, demonstrating the value of deep feature learning over handcrafted MFCCs. The RF is also the only model where val and test AUC are directly comparable, since its evaluation was built into train_rf.py with an explicit test evaluation step.
 - The pretrained Transformer is the most stable model across seeds (std=0.0039), while the CNN-Transformer shows the highest variance (std=0.0092), consistent with the known instability of training Transformer components from scratch.
 - Val and test AUC rankings are consistent across all models — no model that performs well on val degrades on test — giving confidence that the val results are a reliable proxy for generalisation.
 
