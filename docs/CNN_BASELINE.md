@@ -46,27 +46,15 @@ python scripts/hp_search.py --model cnn_baseline --n_trials 6 \
 
 Key observations: ResNet-34 consistently outperforms ResNet-18 across all LR/wd combinations (~+0.005 AUC). Higher LR (3e-3) works well for CNNs unlike Transformers where it causes collapse. Deeper backbone captures richer mel-spectrogram features at similar training cost (~975s vs ~615s per trial).
 
-**Note:** The HP-search best config (ResNet-34, lr=3e-3) was not used for the multi-seed comparison runs. The seed-42 training was completed first with ResNet-18 + lr=1e-3; seeds 123 and 456 kept the same config so that the mean and variance are computed over comparable runs. ResNet-34 with the optimal LR would likely push mean AUC meaningfully above 0.9278.
+**Note:** The HP-search best config (ResNet-34, lr=3e-3) was not used for the multi-seed comparison runs. The seed-42 training was completed first with ResNet-18 + lr=1e-3; seeds 123 and 456 kept the same config so that the mean and variance are computed over comparable runs. ResNet-34 with the optimal LR would likely push mean AUC meaningfully above 0.9289, but since it is out of scope, we will stick with ResNet-18 (already provides good results).
 
 ## Multi-seed robustness (70/15/15 split)
 
-Three runs with different random seeds. Note: seed 42 used 5 epochs + CosineAnnealingLR (no warmup, no label smoothing); seeds 123 and 456 used 15 epochs + 5-epoch linear warmup + label smoothing 0.1 to match the Transformer training protocol — a fair comparison across models requires the same harness, so the later runs are the more reliable data points.
 
-| Seed | best val_AUC | best val_F1 | epochs | lr | warmup | label_smoothing |
-|------|-------------|-------------|--------|----|--------|-----------------|
-| 42   | 0.9540      | 0.4844      | 5      | 1e-3 | none | 0.0 |
-| 123  | 0.9105      | —           | 15     | 1e-3 | 5 epochs | 0.1 |
-| 456  | 0.9190      | —           | 15     | 1e-3 | 5 epochs | 0.1 |
-| **mean** | **0.9278** | — | | | | |
-| **std**  | **0.0192** | — | | | | |
-
-The seed-42 run is notably higher than seeds 123/456, likely reflecting the shorter schedule (CosineAnnealingLR over 5 epochs is a steeper decay that suits a simpler CNN). The higher variance across seeds (std=0.0192) compared to the pretrained Transformer (std=0.0037) is consistent with training from scratch — the optimisation landscape is more sensitive to initialisation. Full cross-model comparison in [RESULTS.md](RESULTS.md).
-
-## Comparison
-
-| Model | val_AUC (seed 42) | val_F1 (seed 42) | mean val_AUC (3 seeds) | Notes |
-|---|---|---|---|---|
-| `cnn_baseline` (ResNet-18) | 0.9540 | 0.4844 | 0.9278 ± 0.0192 | This model |
-| `vit_baseline` (ViT-Small, scratch) | 0.8922 | 0.3479 | 0.9002 ± 0.0084 | [VIT_BASELINE.md](VIT_BASELINE.md) |
-| `cnn_transformer` | 0.9498 | 0.2334 | 0.9371 ± 0.0092 | [CNN_TRANSFORMER.md](CNN_TRANSFORMER.md) |
-| `pretrained_transformer` | 0.9537 | 0.5753 | 0.9550 ± 0.0037 | [PRETRAINED_TRANSFORMER.md](PRETRAINED_TRANSFORMER.md) |
+| Seed | best val_AUC | best val_F1 | epochs |  lr  |  warmup  | label_smoothing |
+|------|--------------|-------------|--------|------|----------|-----------------|
+| 42   | 0.9289       | 0.2654      | 15     | 1e-3 | 5 epochs | 0.1 |
+| 123  | 0.9105       | 0.2098      | 15     | 1e-3 | 5 epochs | 0.1 |
+| 456  | 0.9190       | 0.2569      | 15     | 1e-3 | 5 epochs | 0.1 |
+| **mean** | **0.9182** | — | | | | |
+| **std**  | **0.0075** | — | | | | |
